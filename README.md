@@ -1,11 +1,7 @@
-<!--- # Cell-Li-Gent--->
 ## Overview
+Ramping up battery modeling by more intensively using data, cutting down on the need for tailored testing protocols typically used to identify parameters. Instead, a randomized protocol helps create synthetic datasets through electrochemical simulation to train a neural network. Building from my thesis proposal, the target is to develop a model that predicts and also reveals new, efficient ways to operate batteries using an agent.
 
-This project emphasizes a data-centric approach to enhance battery modeling, aiming to improve the accuracy of state estimation by utilizing the datas full potential. Synthetic datasets, generated through electrochemical methods, inform the training of specialized neural networks. Initial benchmarks provide a framework for this exploration. The aspiration is to develop a model that offers non-conventional outputs, potentially facilitating innovative operational strategies through the deployment of a more capable learning agent.
-
-## Motivation
-
-This project draws from foundational concepts initially laid out in my [masterâ€™s thesis](/inspiration/thesis.pdf) proposal, setting the stage for their expansion and broader application in battery modeling:
+My [thesis](/doc/thesis.pdf) benchmark indicates that neural networks with few parameters (~350k) can already perform on an order of magnitude comparable to traditional methods.
 
 | Dataset | Model                         | MSE    | MAE    |
 |---------|-------------------------------|--------|--------|
@@ -14,7 +10,6 @@ This project draws from foundational concepts initially laid out in my [masterâ€
 | NMC     | Data-Driven (Transformer)     | 8.3e-5 | 8.0e-3 |
 | NMC     | Classical (ECM)               | 1.0e-7 | 2.9e-4 |
 
-This table showcases the best-performing models for State-of-Charge (SoC) prediction as documented in the thesis. Focusing (order of magnitude) on accuracy of compact, data-driven models (350k parameters) in contrast to traditional Equivalent-Circuit-Models (ECMs).
+## Structure
 
 ## Results
-...to be continued...
