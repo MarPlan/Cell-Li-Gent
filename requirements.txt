@@ -1,0 +1,18 @@
+numpy
+torch
+lightning
+numpy
+pandas
+matplotlib
+seaborn
+
+# scikit_learn
+# scipy
+# scikit_optimize
+# ConfigSpace
+# extensions==0.4
+# joblib==1.2.0
+# pykeops==2.1.2
+# smac==2.0.0
+# ssqueezepy==0.6.3
+# tabpfn==0.1.9

@@ -1,6 +1,7 @@
 # General
 .DS_Store
 __pycache__/
-venv/
+.venv/
 
+README_draft.md
 data/
