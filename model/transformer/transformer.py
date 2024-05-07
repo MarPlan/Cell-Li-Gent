@@ -1,16 +1,16 @@
+import math
+from dataclasses import dataclass
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dataclasses import dataclass
-from typing import Tuple
-import math
 
 
 @dataclass
-class Hyperparameter:
+class ModelArgs:
     pe_type: str = "default"
     norm_type: str = "default"
-    lr: float = 1e-6
     dim_model: int = 128
     dim_out: int = 128
     dim_inp: int = 1
@@ -19,16 +19,17 @@ class Hyperparameter:
     rope_theta: float = 10000.0
     dropout: float = 1.0
     n_layer: int = 10
+    bias: bool = False  # do we use bias inside LayerNorm and Linear layers?
 
 
-def precompute_abs_pos(config):
+def precompute_abs_pos(config: ModelArgs):
     # Compute the positional encodings in advance
-    position = torch.arange(0, config.max_len).unsqueeze(1)
+    position = torch.arange(0, config.max_seq_len).unsqueeze(1)
     div_term = torch.exp(
-        torch.arange(0, config.d_model, 2)
-        * -(torch.log(torch.tensor(10000.0)) / config.d_model)
+        torch.arange(0, config.dim_model, 2)
+        * -(torch.log(torch.tensor(10000.0)) / config.dim_model)
     )
-    positional_encoding = torch.zeros(config.max_len, config.d_model)
+    positional_encoding = torch.zeros(config.max_seq_len, config.dim_model)
     positional_encoding[:, 0::2] = torch.sin(position * div_term)
     positional_encoding[:, 1::2] = torch.cos(position * div_term)
     return positional_encoding
@@ -179,9 +180,9 @@ class Block(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, config: Hyperparameter):
+    def __init__(self, config: ModelArgs):
         self.config = config
-        if config.pe_type != 'RoPE':
+        if config.pe_type != "RoPE":
             self.abs_pos = precompute_abs_pos(config)
             self.abs_pe = apply_absolute_emb
 
@@ -216,8 +217,8 @@ class Transformer(nn.Module):
 
     def forward(self, x: torch.Tensor):
         x = self.transformer.inp_emb(x)
-        if self.config.pe_type != 'RoPe':
-            x=self.abs_pe(x, self.abs_pos)
+        if self.config.pe_type != "RoPe":
+            x = self.abs_pe(x, self.abs_pos)
         x = self.transformer.drop(x)
         for block in self.transformer.h:
             x = block(x)

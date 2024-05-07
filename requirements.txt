@@ -5,6 +5,7 @@ numpy
 pandas
 matplotlib
 seaborn
+debugpy
 
 # scikit_learn
 # scipy
