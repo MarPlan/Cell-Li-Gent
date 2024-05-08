@@ -1,14 +1,14 @@
 # Cell-Li-Gent
 
-I’m diving into a data-driven approach for multivariate time series
+I’m diving inte a data-driven approach for multivariate time series
 prediction, aiming to simplify the battery modeling process and cut down
 on expensive battery tests. By fully harnessing the data, I’m using a
 randomized protocol to create a synthetic dataset via electrochemical
-simulation (DFN using [PyBaMM](https://github.com/pybamm-team/PyBaMM)).
-These dataset then serves as fuel to train neural networks. Building on
-what I laid out in my [thesis](/doc/thesis.pdf) proposal, the goal is to
-not just predict battery behavior but to also uncover more efficient
-ways to operate batteries using an intelligent agent.
+simulation (DFN using [PyBaMM](https://github.com/pybamm-team/PyBaMM)
+\[1\]). This dataset then serves as fuel to train neural networks.
+Building on what I laid out in my [thesis](/doc/thesis.pdf) proposal,
+the goal is to not just predict battery behavior but to also uncover
+more efficient ways to operate batteries using an intelligent agent.
 
 Here’s a snapshot from my [thesis](/doc/thesis.pdf) where I compared a
 classic method against a neural network that doesn’t go overboard on the
@@ -27,13 +27,13 @@ par with the traditional model:
 The [model](/model) directory has the designs I’m considering:
 
 - Transformer based on Meta’s [Llama
-  3](https://github.com/meta-llama/llama3) \[1\]
+  3](https://github.com/meta-llama/llama3) \[2\]
 
 - Mamba (State-Space) based on
-  [Mamba](https://github.com/mamba-org/mamba) \[2\]
+  [Mamba](https://github.com/mamba-org/mamba) \[3\]
 
 - JEPA (Joint-Embeddings) based on Meta’s
-  [I-JEPA](https://github.com/facebookresearch/ijepa) \[3\]
+  [I-JEPA](https://github.com/facebookresearch/ijepa) \[4\]
 
 This project also heavily utilizes Andrej Karpathy’s
 [nanoGPT](https://github.com/karpathy/nanoGPT/tree/master).
@@ -41,16 +41,13 @@ This project also heavily utilizes Andrej Karpathy’s
 Why am I picking these architectures for battery state estimation? It’s
 because Transformers are everywhere, the State-Space method has been
 reliable in traditional battery modeling by considering historical
-performance, and then there’s Jepa—it’s intriguing to see how battery
+information, and then there’s Jepa—it’s intriguing to see how battery
 predictions fare when we manipulate data in a latent space.
 
 Executing a full HPO/NAS would burn too many resources and is non
 trivial considering the theoretically limitless dataset size. Hence,
-I’ve used published hyperparameters and tailored them with the
-[nanoGPT](https://github.com/karpathy/nanoGPT/tree/master) scaling
-suggestions for a single GPU setup with 80GB. The size for the generated
-battery dataset is also based on the ratio of the tailored parameters
-count to the original parameters count.
+I’ll used published hyperparameters and adjust them for a single GPU
+setup with 80GB.
 
 There’s a lot more interesting architectures and combinations
 thereof—hopefully, as computational costs might distribute, digging into
@@ -64,9 +61,19 @@ these will be feasible.
 
 <div id="refs" class="references csl-bib-body" entry-spacing="0">
 
-<div id="ref-Touvron2023" class="csl-entry">
+<div id="ref-Sulzer2021" class="csl-entry">
 
 <span class="csl-left-margin">\[1\]
+</span><span class="csl-right-inline">V. Sulzer, S. G. Marquis, R.
+Timms, M. Robinson, and S. J. Chapman, “Python Battery Mathematical
+Modelling (PyBaMM),” *JORS*, vol. 9, no. 1, p. 14, Jun. 2021, doi:
+[10.5334/jors.309](https://doi.org/10.5334/jors.309).</span>
+
+</div>
+
+<div id="ref-Touvron2023" class="csl-entry">
+
+<span class="csl-left-margin">\[2\]
 </span><span class="csl-right-inline">H. Touvron *et al.*, “LLaMA: Open
 and Efficient Foundation Language Models.” arXiv, Feb. 27, 2023.
 Accessed: May 05, 2024. \[Online\]. Available:
@@ -76,7 +83,7 @@ Accessed: May 05, 2024. \[Online\]. Available:
 
 <div id="ref-Gu2023" class="csl-entry">
 
-<span class="csl-left-margin">\[2\]
+<span class="csl-left-margin">\[3\]
 </span><span class="csl-right-inline">A. Gu and T. Dao, “Mamba:
 Linear-Time Sequence Modeling with Selective State Spaces.” arXiv, Dec.
 01, 2023. Accessed: Apr. 24, 2024. \[Online\]. Available:
@@ -86,7 +93,7 @@ Linear-Time Sequence Modeling with Selective State Spaces.” arXiv, Dec.
 
 <div id="ref-Assran2023" class="csl-entry">
 
-<span class="csl-left-margin">\[3\]
+<span class="csl-left-margin">\[4\]
 </span><span class="csl-right-inline">M. Assran *et al.*,
 “Self-Supervised Learning from Images with a Joint-Embedding Predictive
 Architecture.” arXiv, Apr. 13, 2023. Accessed: Apr. 24, 2024.

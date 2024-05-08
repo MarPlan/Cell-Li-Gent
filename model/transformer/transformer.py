@@ -1,3 +1,12 @@
+"""
+Basically a copy of:
+https://github.com/karpathy/nanoGPT/blob/master/model.py
+https://github.com/meta-llama/llama3/blob/main/llama/model.py
+with only minor adjustments
+*thank you*
+"""
+
+import inspect
 import math
 from dataclasses import dataclass
 from typing import Tuple
@@ -15,6 +24,7 @@ class ModelArgs:
     dim_out: int = 128
     dim_inp: int = 1
     n_heads: int = 16
+    seq_len: int = 256
     max_seq_len: int = 256
     rope_theta: float = 10000.0
     dropout: float = 1.0
@@ -96,7 +106,8 @@ class CausalSelfAttention(nn.Module):
     def forward(self, x):
         # batch size, sequence length, embedding dimensionality (n_embd)
         B, T, C = x.size()
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        # calculate query, key, values for all heads in batch and move
+        # head forward to be the batch dim
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
         # (B, nh, T, hs)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
@@ -104,7 +115,8 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+        # causal self-attention; Self-attend:
+        # (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         # efficient attention using Flash Attention CUDA kernels
         if self.pe_type == "RoPE":
             q, k = self.rope(q, k, freqs_cis=self.freqs_cis)
@@ -206,6 +218,8 @@ class Transformer(nn.Module):
                 torch.nn.init.normal_(
                     p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer)
                 )
+        # report number of parameters
+        print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -215,7 +229,7 @@ class Transformer(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, y=None):
         x = self.transformer.inp_emb(x)
         if self.config.pe_type != "RoPe":
             x = self.abs_pe(x, self.abs_pos)
@@ -223,6 +237,84 @@ class Transformer(nn.Module):
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
-        x = self.output(x)
+        if y is not None:
+            # if we are given some desired targets also calculate the loss
+            out = self.output(x)
+            loss = F.mse_loss(out, y)
+        else:
+            # inference-time mini-optimization: only forward the lm_head on the very last position
+            out = self.output(
+                x[:, [-1], :]
+            )  # note: using list [-1] to preserve the time dim
+            loss = None
 
-        return x
+        return out, loss
+
+    def get_num_params(self, non_embedding=False):
+        """
+        Return the number of parameters in the model.
+        For non-embedding count (default), the position embeddings get subtracted.
+        The token embeddings would too, except due to the parameter sharing these
+        params are actually used as weights in the final layer, so we include them.
+        """
+        n_params = sum(p.numel() for p in self.parameters())
+        # if non_embedding:
+        #     n_params -= self.transformer.wpe.weight.numel()
+        return n_params
+
+    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+        # start with all of the candidate parameters
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        # filter out those that do not require grad
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        # create optim groups. Any parameters that is 2D will be weight decayed,
+        # otherwise no. i.e. all weight tensors in matmuls + embeddings decay,
+        # all biases and layernorms don't.
+        decay_params = [p for _, p in param_dict.items() if p.dim() >= 2]
+        nodecay_params = [p for _, p in param_dict.items() if p.dim() < 2]
+        optim_groups = [
+            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": nodecay_params, "weight_decay": 0.0},
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        print(
+            f"num decayed parameter tensors: {len(decay_params)}, "
+            f"with {num_decay_params:,} parameters"
+        )
+        print(
+            f"num non-decayed parameter tensors: {len(nodecay_params)}, "
+            f"with {num_nodecay_params:,} parameters"
+        )
+        # Create AdamW optimizer and use the fused version if it is available
+        fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and device_type == "cuda"
+        extra_args = dict(fused=True) if use_fused else dict()
+        optimizer = torch.optim.AdamW(
+            optim_groups, lr=learning_rate, betas=betas, **extra_args
+        )
+        print(f"using fused AdamW: {use_fused}")
+
+        return optimizer
+
+    def estimate_mfu(self, fwdbwd_per_iter, dt, flops_promised):
+        """estimate model flops utilization (MFU) in units of bfloat16 peak FLOPS"""
+        # first estimate the number of flops we do per iteration.
+        # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
+        N = self.get_num_params()
+        # scale up according to input dim of the time series, perhaps conversion to
+        L, H, Q, T = (
+            self.config.n_layer,
+            self.config.n_heads,
+            self.config.dim_model // self.config.n_heads,
+            self.config.seq_len,
+        )
+        # a single token is not correct this way
+        D = self.config.dim_inp
+        flops_per_token = 6 * N * D + 12 * L * H * Q * T
+        flops_per_fwdbwd = flops_per_token * T
+        flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
+        # express our flops throughput as ratio of A100 bfloat16 peak flops
+        flops_achieved = flops_per_iter * (1.0 / dt)  # per second
+        mfu = flops_achieved / flops_promised
+        return mfu
