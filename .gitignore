@@ -4,4 +4,7 @@ __pycache__/
 .venv/
 
 README_draft.md
-data/
+data/current/
+data/train/
+data/test/
+ckpt/

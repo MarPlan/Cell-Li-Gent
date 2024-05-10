@@ -11,16 +11,16 @@ import os
 import time
 from contextlib import nullcontext
 
-import numpy as np
 import torch
 import wandb
 
+from data.prepare_data import BatteryData
 from model.transformer.transformer import ModelArgs, Transformer
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a Transformer with 124M params
 # I/O
-out_dir = "ckpts/transformer/"
+out_dir = "ckpt/transformer/"
 eval_interval = 2000
 log_interval = 1
 eval_iters = 200
@@ -30,7 +30,9 @@ wandb_log = False  # disabled by default
 wandb_project = "Cell-Li-Gent"
 wandb_run_name = "transformer"  # 'run' + str(time.time())
 # data
+mode = "train"  # or test
 dataset = "BatteryData"
+data_dir = "/data/train"
 gradient_accumulation_steps = 5 * 8  # used to simulate larger batch sizes
 batch_size = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 1024
@@ -71,13 +73,28 @@ config_keys = [
 ]
 config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 # -----------------------------------------------------------------------------
-# -----------------------------------------------------------------------------
 # various inits, derived attributes, I/O setup
 # consider the input is of shape [batch_size, seq_len, number_inputs]
 inp_values_per_iter = gradient_accumulation_steps * batch_size * seq_len
 print(f"tokens per iteration will be: {inp_values_per_iter:,}")
 
+# Ensure the base directory does exist by creating if it does not
 os.makedirs(out_dir, exist_ok=True)
+# Check if the directory exists
+if os.path.exists(out_dir):
+    version = 1
+    # Try new subdirectories with an increasing version number
+    while True:
+        new_out_dir = os.path.join(out_dir, f"v_{version}")
+        if not os.path.exists(new_out_dir):
+            os.makedirs(new_out_dir)
+            print(
+                f"Created new directory {new_out_dir} because {out_dir} already exists."
+            )
+            out_dir = new_out_dir
+            break
+        version += 1
+
 torch.manual_seed(420)
 torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
@@ -94,43 +111,12 @@ ctx = (
     else torch.autocast(device_type=device_type, dtype=ptdtype)
 )
 
-# FIX: Adjust that!
-# poor man's data loader
-data_dir = os.path.join("data", dataset)
-
-
-def get_batch(split):
-    # We recreate np.memmap every batch to avoid a memory leak, as per
-    # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
-    if split == "train":
-        data = np.memmap(os.path.join(data_dir, "train.bin"), dtype=np.uint16, mode="r")
-    else:
-        data = np.memmap(os.path.join(data_dir, "val.bin"), dtype=np.uint16, mode="r")
-    ix = torch.randint(len(data) - seq_len, (batch_size,))
-    x = torch.stack(
-        [torch.from_numpy((data[i : i + seq_len]).astype(np.int64)) for i in ix]
-    )
-    y = torch.stack(
-        [torch.from_numpy((data[i + 1 : i + 1 + seq_len]).astype(np.int64)) for i in ix]
-    )
-    if device_type == "cuda":
-        # pin arrays x,y, which allows us to move them to GPU asynchronously
-        # (non_blocking=True)
-        x, y = (
-            x.pin_memory().to(device, non_blocking=True),
-            y.pin_memory().to(device, non_blocking=True),
-        )
-    else:
-        x, y = x.to(device), y.to(device)
-    return x, y
-
-
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
 iter_num = 0
 best_val_loss = 1e9
-
-
 # -----------------------------------------------------------------------------
+# data init
+train_data = BatteryData(data_dir, mode, batch_size, seq_len, device)
 # model init
 model_args = ModelArgs(
     n_layer=n_layer,
@@ -194,7 +180,7 @@ def estimate_loss():
     for split in ["train", "val"]:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, Y = get_batch(split)
+            X, Y = train_data.get_batch(split)
             with ctx:
                 _, loss = model(X, Y)
             losses[k] = loss.item()
@@ -220,8 +206,9 @@ def get_lr(it):
 
 wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
+
 # training loop
-X, Y = get_batch("train")  # fetch the very first batch
+X, Y = train_data.get_batch("train")  # fetch the very first batch
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
 running_mfu = -1.0
@@ -239,6 +226,7 @@ while True:
             f"val loss {losses['val']:.4f}"
         )
         if wandb_log:
+            # TODO: save file to out_dir, dont override existing files! sub dir or file name
             wandb.log(
                 {
                     "iter": iter_num,
@@ -260,7 +248,12 @@ while True:
                     "config": config,
                 }
                 print(f"saving checkpoint to {out_dir}")
-                torch.save(checkpoint, os.path.join(out_dir, "ckpt.pt"))
+                torch.save(
+                    checkpoint,
+                    os.path.join(
+                        out_dir, f"{checkpoint["best_val_loss"]:1e}_val_loss.pt"
+                    ),
+                )
 
     # forward backward update, with optional gradient accumulation to simulate larger
     # batch size and using the GradScaler if data type is float16
@@ -272,7 +265,7 @@ while True:
             )  # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while
         # model is doing the forward pass on the GPU
-        X, Y = get_batch("train")
+        X, Y = train_data.get_batch("train")
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
     # clip the gradient
@@ -310,3 +303,7 @@ while True:
     # termination conditions
     if iter_num > max_iters:
         break
+
+# TODO: make init script function!
+if __name__ == "__main__":
+    pass

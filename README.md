@@ -22,7 +22,7 @@ par with the traditional model:
 | NMC     | Data-Driven (Transformer) | 8.3e-5 | 8.0e-3 |
 | NMC     | Classical (ECM)           | 1.0e-7 | 2.9e-4 |
 
-## Realization
+## Realization (…working on it!)
 
 The [model](/model) directory has the designs I’m considering:
 
@@ -53,9 +53,7 @@ There’s a lot more interesting architectures and combinations
 thereof—hopefully, as computational costs might distribute, digging into
 these will be feasible.
 
-## Result
-
-… still brewing …
+## Result (…still brewing…)
 
 ## References
 
