@@ -16,6 +16,7 @@ import torch
 
 class BatteryData():
     def __init__(self, dir_name: str, mode, batch_size, seq_len, device):
+        # TODO: when loading check for dataset signature and corresponding scaler if they match if not raise error
         self.file =h5py.File(os.path.join(dir_name, mode, ".hdf5"), "r")
 
         self.batch_size = batch_size
