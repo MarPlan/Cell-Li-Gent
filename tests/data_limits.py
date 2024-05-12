@@ -2,14 +2,14 @@ import re
 
 import numpy as np
 
-from dummy_data import BatteryDatasheet
+from util.config_data import BatteryDatasheet
 
 
 def verify_data_limits(dataset):
     # Currently only inputs get checked
     limits = BatteryDatasheet()
     inp_params = [
-        param.split("_")[1] if "Inp" in param else None
+        param.split(" ")[0][4:] if "Inp_" in param else None
         for param in dataset.attrs["dim_2"]
     ]
 
@@ -26,14 +26,14 @@ def verify_data_limits(dataset):
         data = dataset[:, :, index]
 
         if param == "I_terminal":
-            max_limit = limits.I_terminal["long_max"]
-            min_limit = limits.I_terminal["long_min"]
+            max_limit = limits.I_terminal["max"]
+            min_limit = limits.I_terminal["min"]
             if (data > max_limit).any() or (data < min_limit).any():
                 raise ValueError(
                     f"I_terminal values should be between {min_limit} and {max_limit}"
                 )
-            verified_values["I_terminal_long_max"] = data.max()
-            verified_values["I_terminal_long_min"] = data.min()
+            verified_values["I_terminal_max"] = data.max()
+            verified_values["I_terminal_min"] = data.min()
 
             # Short term checks
             window_size = limits.I_terminal["short_time"] // dt
@@ -63,8 +63,10 @@ def verify_data_limits(dataset):
             )
 
             # Capacity check
-            charge = np.trapz(data, dx=dt, axis=1)
-            if (charge > limits.capa["SoH_100"]).any() or (charge < 0).any():
+            charge = np.trapz(data, dx=dt, axis=1) / 60 / 60 # convert to [Ah]
+            if (charge > limits.capa["max"]).any() or (
+                charge < -limits.capa["max"]
+            ).any():
                 raise ValueError("Charge capacity outside of allowable range")
             verified_values["capa_max"] = charge.max()
             verified_values["capa_min"] = charge.min()
@@ -89,4 +91,4 @@ def verify_data_limits(dataset):
             verified_values["T_surface_max"] = data.max()
             verified_values["T_surface_min"] = data.min()
 
-    dataset.attrs["verified_values"] = verified_values
+    dataset.attrs["verified_values"] = str(verified_values)

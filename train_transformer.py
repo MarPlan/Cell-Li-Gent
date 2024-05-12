@@ -14,8 +14,8 @@ from contextlib import nullcontext
 import torch
 import wandb
 
-from util.prepare_data import BatteryData
 from model.transformer.transformer import ModelArgs, Transformer
+from util.prepare_data import BatteryData
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a Transformer with 124M params
@@ -30,16 +30,15 @@ wandb_log = False  # disabled by default
 wandb_project = "Cell-Li-Gent"
 wandb_run_name = "transformer"  # 'run' + str(time.time())
 # data
-mode = "train"  # or test
-dataset = "BatteryData"
-data_dir = "/data/train"
-gradient_accumulation_steps = 5 * 8  # used to simulate larger batch sizes
-batch_size = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
-seq_len = 1024
+dataset = "random_scaled"
+data_file = os.path.abspath("data/train/dummy_battery_data.h5")
+gradient_accumulation_steps = 1 * 4  # used to simulate larger batch sizes
+batch_size = 8  # if gradient_accumulation_steps > 1, this is the micro-batch size
+seq_len = 32
 # model
-n_layer = 12
-n_heads = 12
-dim_model = 768
+n_layer = 2
+n_heads = 2
+dim_model = 16
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
@@ -55,15 +54,15 @@ warmup_iters = 2000  # how many steps to warm up for
 lr_decay_iters = 600000  # should be ~= max_iters per Chinchilla
 min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # system
-device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps'
+device = "mps"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps'
 # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 dtype = (
     "bfloat16"
     if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     else "float16"
 )
-# use PyTorch 2.0 to compile the model to be faster
-compile = True
+# TODO: use PyTorch 2.0 to compile the model to be faster CRASHING
+compile = False
 flops_promised = 312e12  # A100 GPU bfloat16 peak flops is 312 TFLOPS
 # -----------------------------------------------------------------------------
 config_keys = [
@@ -116,16 +115,9 @@ iter_num = 0
 best_val_loss = 1e9
 # -----------------------------------------------------------------------------
 # data init
-train_data = BatteryData(data_dir, mode, batch_size, seq_len, device)
+train_data = BatteryData(data_file, dataset, batch_size, seq_len, device)
 # model init
-model_args = ModelArgs(
-    n_layer=n_layer,
-    n_heads=n_heads,
-    dim_model=dim_model,
-    seq_len=seq_len,
-    bias=bias,
-    dropout=dropout,
-)  # start with model_args from command line
+model_args = ModelArgs( n_layer=n_layer, n_heads=n_heads, dim_model=dim_model, seq_len=seq_len, max_seq_len=seq_len, bias=bias, dropout=dropout)  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -138,7 +130,7 @@ elif init_from == "resume":
     checkpoint_model_args = checkpoint["model_args"]
     # force these config attributes to be equal otherwise we can't even resume training
     # the rest of the attributes (e.g. dropout) can stay as desired from command line
-    for k in ["n_layer", "n_head", "n_embd", "seq_len", "bias"]:
+    for k in ["n_layer", "n_head", "dim_model", "seq_len", "bias"]:
         setattr(model_args, k, checkpoint_model_args[k])
     # create the model
     model = Transformer(model_args)
@@ -165,7 +157,7 @@ if init_from == "resume":
     optimizer.load_state_dict(checkpoint["optimizer"])
 checkpoint = None  # free up memory
 
-# compile the model
+# TODO: CRASHES compile the model
 if compile:
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
@@ -204,7 +196,8 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 
-wandb.init(project=wandb_project, name=wandb_run_name, config=config)
+# TODO: chrashed
+# wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 
 # training loop
@@ -248,10 +241,11 @@ while True:
                     "config": config,
                 }
                 print(f"saving checkpoint to {out_dir}")
+
                 torch.save(
                     checkpoint,
                     os.path.join(
-                        out_dir, f"{checkpoint["best_val_loss"]:1e}_val_loss.pt"
+                        out_dir, f"{checkpoint['best_val_loss']:.1e}_val_loss.pt"
                     ),
                 )
 

@@ -21,8 +21,8 @@ class ModelArgs:
     pe_type: str = "default"
     norm_type: str = "default"
     dim_model: int = 128
-    dim_out: int = 128
-    dim_inp: int = 1
+    dim_out: int = 6
+    dim_inp: int = 6
     n_heads: int = 16
     seq_len: int = 256
     max_seq_len: int = 256
@@ -30,6 +30,7 @@ class ModelArgs:
     dropout: float = 1.0
     n_layer: int = 10
     bias: bool = False  # do we use bias inside LayerNorm and Linear layers?
+    act_type: str = "GELU"
 
 
 def precompute_abs_pos(config: ModelArgs):
@@ -47,7 +48,7 @@ def precompute_abs_pos(config: ModelArgs):
 
 def apply_absolute_emb(x, positional_encoding):
     # Add positional encoding to input
-    x = x + positional_encoding[: x.size(0), :]
+    x = x + positional_encoding.to(x.device)
     return x
 
 
@@ -83,7 +84,7 @@ def apply_rotary_emb(
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        assert config.n_embd % config.n_head == 0
+        assert config.dim_model % config.n_heads == 0
         self.pe_type = config.pe_type
         if config.pe_type == "RoPE":
             self.freqs_cis = precompute_freqs_cis(
@@ -93,28 +94,30 @@ class CausalSelfAttention(nn.Module):
             )
             self.rope = apply_rotary_emb
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
+        self.c_attn = nn.Linear(
+            config.dim_model, 3 * config.dim_model, bias=config.bias
+        )
         # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.c_proj = nn.Linear(config.dim_model, config.dim_model, bias=config.bias)
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
-        self.n_head = config.n_head
-        self.n_embd = config.n_embd
+        self.n_heads = config.n_heads
+        self.dim_model = config.dim_model
         self.dropout = config.dropout
 
     def forward(self, x):
-        # batch size, sequence length, embedding dimensionality (n_embd)
+        # batch size, sequence length, embedding dimensionality (dim_model)
         B, T, C = x.size()
         # calculate query, key, values for all heads in batch and move
         # head forward to be the batch dim
-        q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
+        q, k, v = self.c_attn(x).split(self.dim_model, dim=2)
         # (B, nh, T, hs)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        k = k.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)
         # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        q = q.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)
         # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        v = v.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)
         # causal self-attention; Self-attend:
         # (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         # efficient attention using Flash Attention CUDA kernels
@@ -128,6 +131,10 @@ class CausalSelfAttention(nn.Module):
             dropout_p=self.dropout if self.training else 0,
             is_causal=True,
         )
+        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+
+        # output projection
+        y = self.resid_dropout(self.c_proj(y))
         return y
 
 
@@ -138,8 +145,10 @@ class MLP(nn.Module):
             self.act = SwiGLU()
         else:
             self.act = nn.GELU()
-        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
-        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.c_fc = nn.Linear(config.dim_model, 4 * config.dim_model, bias=config.bias)
+        self.c_proj = nn.Linear(
+            4 * config.dim_model, config.dim_model, bias=config.bias
+        )
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
@@ -177,12 +186,12 @@ class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
         if config.norm_type == "RMSNorm":
-            self.norm = RMSNorm(config.d_model)
+            self.norm = RMSNorm(config.dim_model)
         else:
-            self.norm = nn.LayerNorm(config.d_model, bias=False)
-        self.ln_1 = self.norm(config.n_embd, bias=config.bias)
+            self.norm = nn.LayerNorm(config.dim_model, bias=False)
+        self.ln_1 = self.norm
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = self.norm(config.n_embd, bias=config.bias)
+        self.ln_2 = self.norm
         self.mlp = MLP(config)
 
     def forward(self, x):
@@ -193,6 +202,7 @@ class Block(nn.Module):
 
 class Transformer(nn.Module):
     def __init__(self, config: ModelArgs):
+        super().__init__()
         self.config = config
         if config.pe_type != "RoPE":
             self.abs_pos = precompute_abs_pos(config)
@@ -200,7 +210,7 @@ class Transformer(nn.Module):
 
         self.transformer = nn.ModuleDict(
             dict(
-                inp_emb=nn.Embedding(config.dim_inp, config.dim_model),
+                inp_emb=nn.Linear(config.dim_inp, config.dim_model, bias=False),
                 drop=nn.Dropout(config.dropout),
                 h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
                 ln_f=RMSNorm(config.dim_model)
