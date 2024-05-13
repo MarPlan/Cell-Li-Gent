@@ -18,8 +18,8 @@ import torch.nn.functional as F
 
 @dataclass
 class ModelArgs:
-    pe_type: str = "default"
-    norm_type: str = "default"
+    pe_type: str = "RoPE"
+    norm_type: str = "RMSNorm"
     dim_model: int = 128
     dim_out: int = 6
     dim_inp: int = 6
@@ -30,7 +30,7 @@ class ModelArgs:
     dropout: float = 1.0
     n_layer: int = 10
     bias: bool = False  # do we use bias inside LayerNorm and Linear layers?
-    act_type: str = "GELU"
+    act_type: str = "SwiGLU"
 
 
 def precompute_abs_pos(config: ModelArgs):
@@ -54,10 +54,16 @@ def apply_absolute_emb(x, positional_encoding):
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=freqs.device, dtype=torch.float32)
-    freqs = torch.outer(t, freqs)
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-    return freqs_cis
+    t = torch.arange(end, device=freqs.device)  # type: ignore
+    freqs = torch.outer(t, freqs).float()  # type: ignore
+    freqs_cos = torch.cos(freqs)  # real part
+    freqs_sin = torch.sin(freqs)  # imaginary part
+    return freqs_cos, freqs_sin
+    # freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+    # t = torch.arange(end, device=freqs.device, dtype=torch.float32)
+    # freqs = torch.outer(t, freqs)
+    # freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+    # return freqs_cis
 
 
 def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
@@ -65,20 +71,40 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     assert 0 <= 1 < ndim
     assert freqs_cis.shape == (x.shape[1], x.shape[-1])
     shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-    return freqs_cis.view(*shape)
+    return freqs_cis.view(shape)
 
 
 def apply_rotary_emb(
     xq: torch.Tensor,
     xk: torch.Tensor,
-    freqs_cis: torch.Tensor,
+    freqs_cos: torch.Tensor,
+    freqs_sin: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
-    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
-    freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
-    xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
-    xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+    # reshape xq and xk to match the complex representation
+    xq_r, xq_i = xq.float().reshape(xq.shape[:-1] + (-1, 2)).unbind(-1)
+    xk_r, xk_i = xk.float().reshape(xk.shape[:-1] + (-1, 2)).unbind(-1)
+
+    # reshape freqs_cos and freqs_sin for broadcasting
+    freqs_cos = reshape_for_broadcast(freqs_cos, xq_r)
+    freqs_sin = reshape_for_broadcast(freqs_sin, xq_r)
+
+    # apply rotation using real numbers
+    xq_out_r = xq_r * freqs_cos - xq_i * freqs_sin
+    xq_out_i = xq_r * freqs_sin + xq_i * freqs_cos
+    xk_out_r = xk_r * freqs_cos - xk_i * freqs_sin
+    xk_out_i = xk_r * freqs_sin + xk_i * freqs_cos
+
+    # flatten last two dimensions
+    xq_out = torch.stack([xq_out_r, xq_out_i], dim=-1).flatten(3)
+    xk_out = torch.stack([xk_out_r, xk_out_i], dim=-1).flatten(3)
+
     return xq_out.type_as(xq), xk_out.type_as(xk)
+    # xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
+    # xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+    # freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
+    # xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
+    # xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+    # return xq_out.type_as(xq), xk_out.type_as(xk)
 
 
 class CausalSelfAttention(nn.Module):
@@ -87,11 +113,14 @@ class CausalSelfAttention(nn.Module):
         assert config.dim_model % config.n_heads == 0
         self.pe_type = config.pe_type
         if config.pe_type == "RoPE":
-            self.freqs_cis = precompute_freqs_cis(
-                config.dim_model // config.n_heads,
-                config.max_seq_len * 2,
-                config.rope_theta,
-            )
+            freqs_cos, freqs_sin = precompute_freqs_cis(config.dim_model // config.n_heads, config.max_seq_len)
+            self.register_buffer("freqs_cos", freqs_cos, persistent=False)
+            self.register_buffer("freqs_sin", freqs_sin, persistent=False)
+            # self.freqs_cis = precompute_freqs_cis(
+            #     config.dim_model // config.n_heads,
+            #     config.max_seq_len * 2,
+            #     config.rope_theta,
+            # )
             self.rope = apply_rotary_emb
         # key, query, value projections for all heads, but in a batch
         self.c_attn = nn.Linear(
@@ -113,16 +142,21 @@ class CausalSelfAttention(nn.Module):
         # head forward to be the batch dim
         q, k, v = self.c_attn(x).split(self.dim_model, dim=2)
         # (B, nh, T, hs)
-        k = k.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)
+        k = k.view(B, T, self.n_heads, C // self.n_heads)
         # (B, nh, T, hs)
-        q = q.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)
+        q = q.view(B, T, self.n_heads, C // self.n_heads)
         # (B, nh, T, hs)
-        v = v.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)
+        v = v.view(B, T, self.n_heads, C // self.n_heads)
         # causal self-attention; Self-attend:
         # (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         # efficient attention using Flash Attention CUDA kernels
         if self.pe_type == "RoPE":
-            q, k = self.rope(q, k, freqs_cis=self.freqs_cis)
+            q, k = self.rope(q,k,self.freqs_cos, self.freqs_sin)
+        # make heads into a batch dimension
+        # (bs, n_local_heads, seqlen, head_dim)
+        q = q.transpose(1, 2) 
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
         y = F.scaled_dot_product_attention(
             q,
             k,
@@ -141,10 +175,9 @@ class CausalSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.act_type = config.act_type
         if config.act_type == "SwiGLU":
-            self.act = SwiGLU()
-        else:
-            self.act = nn.GELU()
+            self.c_fc_2 = nn.Linear(config.dim_model, 4 * config.dim_model, bias=config.bias)
         self.c_fc = nn.Linear(config.dim_model, 4 * config.dim_model, bias=config.bias)
         self.c_proj = nn.Linear(
             4 * config.dim_model, config.dim_model, bias=config.bias
@@ -152,18 +185,21 @@ class MLP(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        x = self.c_fc(x)
-        x = self.act(x)
-        x = self.c_proj(x)
-        x = self.dropout(x)
-        return x
+        if self.act_type=="SwiGLU":
+            return self.dropout(self.c_proj(F.silu(self.c_fc(x)) * self.c_fc_2(x)))
+        else:
+            x = self.c_fc(x)
+            x = F.gelu(x)
+            x = self.c_proj(x)
+            x = self.dropout(x)
+            return x
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, config, eps: float = 1e-6):
+    def __init__(self, dim_model, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(config.dim))
+        self.weight = nn.Parameter(torch.ones(dim_model))
 
     def _norm(self, x):
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
@@ -173,13 +209,13 @@ class RMSNorm(nn.Module):
         return output * self.weight
 
 
-class SwiGLU(nn.Module):
-    def __init__(self):
-        super(SwiGLU, self).__init__()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x, gate = x.chunk(2, dim=-1)
-        return F.silu(gate) * x
+# class SwiGLU(nn.Module):
+#     def __init__(self):
+#         super(SwiGLU, self).__init__()
+#
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         x, gate = x.chunk(2, dim=-1)
+#         return F.silu(gate) * x
 
 
 class Block(nn.Module):
@@ -207,6 +243,11 @@ class Transformer(nn.Module):
         if config.pe_type != "RoPE":
             self.abs_pos = precompute_abs_pos(config)
             self.abs_pe = apply_absolute_emb
+        # else:
+        #     # some useful precompute for the RoPE relative positional embeddings
+        #     freqs_cos, freqs_sin = precompute_freqs_cis(self.params.dim // self.params.n_heads, self.params.max_seq_len)
+        #     self.register_buffer("freqs_cos", freqs_cos, persistent=False)
+        #     self.register_buffer("freqs_sin", freqs_sin, persistent=False)
 
         self.transformer = nn.ModuleDict(
             dict(
@@ -241,9 +282,11 @@ class Transformer(nn.Module):
 
     def forward(self, x: torch.Tensor, y=None):
         x = self.transformer.inp_emb(x)
-        if self.config.pe_type != "RoPe":
+        if self.config.pe_type != "RoPE":
             x = self.abs_pe(x, self.abs_pos)
         x = self.transformer.drop(x)
+        # freqs_cos = self.freqs_cos[:seqlen]
+        # freqs_sin = self.freqs_sin[:seqlen]
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)

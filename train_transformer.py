@@ -33,12 +33,12 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 dataset = "random_scaled"
 data_file = os.path.abspath("data/train/dummy_battery_data.h5")
 gradient_accumulation_steps = 1 * 4  # used to simulate larger batch sizes
-batch_size = 8  # if gradient_accumulation_steps > 1, this is the micro-batch size
-seq_len = 32
+batch_size = 32  # if gradient_accumulation_steps > 1, this is the micro-batch size
+seq_len = 256
 # model
-n_layer = 2
-n_heads = 2
-dim_model = 16
+n_layer = 8
+n_heads = 4
+dim_model = 512
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer

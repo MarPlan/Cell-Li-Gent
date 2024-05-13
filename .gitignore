@@ -8,3 +8,4 @@ data/current/
 data/train/
 data/test/
 ckpt/
+misc.py
