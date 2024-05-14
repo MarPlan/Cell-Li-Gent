@@ -14,11 +14,14 @@ class BatteryDatasheet:
     # dataset and no testing for unspecified values
     I_terminal: Dict[str, int] = field(
         default_factory=lambda: {
-            "max": 360,  # [A] continous
-            "min": -540,  # [A] continous
-            "short_max": 500,  # [A/s]
-            "short_min": -700,  # [A/s]
-            "short_time": 20,  # [s]
+            "chg": -128,  # [A] continous
+            "dchg": 128,  # [A] continous
+            "short_chg": -192,  # [A/s]
+            "short_dchg": 192,  # [A/s]
+            "short_time": 10,  # [s]
+            # Parameter for current profile generation
+            "soc_crit_chg": -36,
+            "soc_crit_dchg": 54,
         }
     )
     U_terminal: Dict[str, float] = field(
@@ -35,10 +38,17 @@ class BatteryDatasheet:
     )
     capa: Dict[str, float] = field(
         default_factory=lambda: {
-            "max": 60,  # [Ah] @ SoH 100
+            "max": 64,  # [Ah] @ SoH 100
             "min": 0,  # [Ah] @ SoH 100
+            # Parameter for current profile generation
+            "soc_crit_max": 0.8,
+            "soc_crit_min": 0.2,
+            "soc_max": 0.97,
+            "soc_min": 0.03,
         }
     )
+    # Parameter for current profile generation
+    dt: int = 1
     # Optional for additional information, unused
     c_rate: Dict[str, float] = field(
         default_factory=lambda: {
@@ -46,6 +56,10 @@ class BatteryDatasheet:
             "min": -9,  # [.]
         }
     )
+
+    def __post_init__(self):
+        self.cycle_time = int(self.capa["max"]) * 20 * 3600  # C/6 as equivalent duration [s]
+        self.seq_len = self.cycle_time // self.dt
 
 
 def scale_data(file_path, dataset_name):

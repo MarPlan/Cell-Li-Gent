@@ -14,7 +14,7 @@ from contextlib import nullcontext
 import torch
 import wandb
 
-from model.transformer.transformer import ModelArgs, Transformer
+from model.transformer import ModelArgs, Transformer
 from util.prepare_data import BatteryData
 
 # -----------------------------------------------------------------------------

@@ -7,7 +7,6 @@
 
 # My model realistic: 100M params -> 2B Token -> 24GB data, but karpathys 9B~17GB binary data
 
-import os
 
 import h5py
 import numpy as np
