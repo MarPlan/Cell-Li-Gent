@@ -1,14 +1,14 @@
 # Cell-Li-Gent
 
-I’m diving inte a data-driven approach for multivariate time series
-prediction, aiming to simplify the battery modeling process and cut down
-on expensive battery tests. By fully harnessing the data, I’m using a
-randomized protocol to create a synthetic dataset via electrochemical
-simulation (DFN using [PyBaMM](https://github.com/pybamm-team/PyBaMM)
-\[1\]). This dataset then serves as fuel to train neural networks.
-Building on what I laid out in my [thesis](/doc/thesis.pdf) proposal,
-the goal is to not just predict battery behavior but to also uncover
-more efficient ways to operate batteries using an intelligent agent.
+A data-driven approach for multivariate time series prediction, aiming
+to simplify the battery modeling process and cut down on expensive
+battery tests. By fully harnessing the data, I’m using a randomized
+protocol to create a synthetic dataset via electrochemical simulation
+(DFN using [PyBaMM](https://github.com/pybamm-team/PyBaMM) \[1\]). This
+dataset then serves as fuel to train neural networks. Building on what I
+laid out in my [thesis](/doc/thesis.pdf) proposal, the goal is to not
+just predict battery behavior but to also uncover more efficient ways to
+operate batteries using an intelligent agent.
 
 Here’s a snapshot from my [thesis](/doc/thesis.pdf) where I compared a
 classic method against a neural network that doesn’t go overboard on the
@@ -22,7 +22,7 @@ par with the traditional model:
 | NMC     | Data-Driven (Transformer) | 8.3e-5 | 8.0e-3 |
 | NMC     | Classical (ECM)           | 1.0e-7 | 2.9e-4 |
 
-## Realization (…working on it!)
+## Overview (…working on it!)
 
 The [model](/model) directory has the designs I’m considering:
 
@@ -30,7 +30,7 @@ The [model](/model) directory has the designs I’m considering:
   3](https://github.com/meta-llama/llama3) \[2\]
 
 - Mamba (State-Space) based on
-  [Mamba](https://github.com/mamba-org/mamba) \[3\]
+  [Mamba](https://github.com/state-spaces/mamba) \[3\]
 
 - JEPA (Joint-Embeddings) based on Meta’s
   [I-JEPA](https://github.com/facebookresearch/ijepa) \[4\]
@@ -46,7 +46,7 @@ predictions fare when we manipulate data in a latent space.
 
 Executing a full HPO/NAS would burn too many resources and is non
 trivial considering the theoretically limitless dataset size. Hence,
-I’ll used published hyperparameters and adjust them for a single GPU
+I’ll use published hyperparameters and adjust them for a single GPU
 setup with 80GB.
 
 There’s a lot more interesting architectures and combinations
