@@ -8,6 +8,8 @@ import numpy as np
 
 @dataclass
 class BatteryDatasheet:
+    # INFO: CHEN2020_COMPOSITE
+
     # Provide all data ranges for input and output!
     # These get tested and scaled accordingly
     # If not specified here -> min/max values for scaling from
