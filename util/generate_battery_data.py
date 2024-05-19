@@ -1,7 +1,74 @@
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 
 from config_data import BatteryDatasheet
+from drive_cycle_bin import load_bins_from_csv
+
+
+def normalize_to_range(data):
+    min_val = np.min(data)
+    max_val = np.max(data)
+    range_val = max_val - min_val
+    if range_val <= 0:
+        data[:] = 1
+        return data
+    else:
+        # Normalize such that the current values are in the range [0, 1]
+        data = (data - min_val) / range_val
+        return data
+
+
+def get_field_current_1(soc_tgt, capa, steps, dt, pos_bin, neg_bin):
+    def generate_current(bin_data, length):
+        curr = []
+        while len(curr) <= length:
+            n = np.random.default_rng().integers(0, len(bin_data))
+            curr.extend(bin_data[n][:, 1])
+        return np.array(curr[:length])
+
+    if steps == 0:
+        curr = 0
+        return curr
+
+    if soc_tgt > 0:
+        curr = generate_current(pos_bin, steps)
+        curr_max = soc_tgt * capa / steps / dt  # [A]
+        curr = normalize_to_range(np.abs(curr)) * curr_max
+    elif soc_tgt < 0:
+        curr = generate_current(neg_bin, steps)
+        curr_max = soc_tgt * capa / steps / dt  # [A]
+        curr = normalize_to_range(np.abs(curr)) * curr_max
+    else:
+        curr = np.zeros(steps)
+
+    return curr
+
+
+def get_field_current(soc_tgt, capa, steps, dt, pos_bin, neg_bin):
+    if soc_tgt > 0:
+        curr = []
+        while len(curr) <= len(steps):
+            n = np.random.default_rng().integers(0, len(pos_bin))
+            curr.extend(pos_bin[n])
+        curr_max = soc_tgt * capa / len(steps) / dt  # [A]
+        # truncate to steps and scale to max possible current
+        curr = np.abs(np.array(curr))
+        curr = curr[: len(steps)] * curr_max
+    if soc_tgt < 0:
+        curr = []
+        while len(curr) <= len(steps):
+            n = np.random.default_rng().integers(0, len(neg_bin))
+            curr.extend(neg_bin[n])
+        curr_max = soc_tgt * capa / len(steps) / dt  # [A]
+        # truncate to steps and scale to max possible current
+        curr = np.abs(np.array(curr))
+        curr = curr[: len(steps)] * curr_max
+    else:
+        curr = np.zeros(len(steps))
+
+    return curr
 
 
 def static_current(specs):
@@ -39,17 +106,21 @@ def static_current(specs):
     mode = "chg"  # chg, dchg
     soc = specs.capa["soc_min"]
     idx = 8  # start with 0 current for 4 steps (initial equilibrium)
+    pos_file = os.path.join("..", "data", "current", "drive_cycle", "pos_bins.csv")
+    neg_file = os.path.join("..", "data", "current", "drive_cycle", "neg_bins.csv")
+    pos_bins, neg_bins = load_bins_from_csv(pos_file, neg_file)
+    soc_tgt = 1
 
     params = [
         [curr_crit_chg, curr_short_chg, curr_cont_chg],
         [curr_crit_dchg, curr_short_dchg, curr_cont_dchg],
     ]
     while idx < seq_len:
-        socs = sample_soc_tgt(mode, soc, soc_min, soc_max)  # (+pos) [.], (-neg) [.]
-
-        for soc_tgt, param in zip(socs, params):
-            # TODO: delete duration
-            duration, steps = sample_duration(
+        for i, param in enumerate(params):
+            soc_tgt = sample_soc_tgt(mode, soc, soc_min, soc_max, abs(soc_tgt))[
+                i
+            ]  # (+pos) [.], (-neg) [.]
+            steps = sample_duration(
                 *param,
                 soc,
                 soc_tgt,
@@ -61,15 +132,23 @@ def static_current(specs):
                 dt,
                 seq_len,
                 idx,
-            )  # [s]
+            )  # int: n_steps based on dt
 
-            curr = soc_tgt * capa / duration  # [A]
+            # curr = soc_tgt * capa / duration  # [A]
+            curr = get_field_current_1(
+                soc_tgt, capa, steps, dt, pos_bins, neg_bins
+            )  # [A]
 
             # Apply charging current and hold step
             sequence[idx : idx + steps] = curr
             idx += steps
 
-            soc += curr * steps * dt / capa
+            if steps <= 1:
+                soc_tgt = curr * steps * dt / capa
+                soc += soc_tgt
+            else:
+                soc_tgt = np.trapz(curr, dx=dt) / capa
+                soc += soc_tgt
 
             duration_hold = np.random.uniform(15, 30)
             steps_hold = int(min(duration_hold / dt, seq_len - idx))
@@ -87,18 +166,18 @@ def static_current(specs):
     return sequence
 
 
-def sample_soc_tgt(mode, soc, soc_min, soc_max):
+def sample_soc_tgt(mode, soc, soc_min, soc_max, soc_swap=1):
     # Option to restrict discharge/charge in crit soc area to enforce full chg/dchg
     if mode == "chg":
         high = soc_max - soc
         soc_chg = np.random.default_rng().uniform(0, high)
-        soc_dchg = np.random.default_rng().uniform(0, min(high, soc - soc_min))
+        soc_dchg = np.random.default_rng().uniform(0, min(soc_swap, soc - soc_min))
         return soc_chg, -soc_dchg
 
     else:
         high = soc - soc_min
         soc_dchg = np.random.default_rng().uniform(0, high)
-        soc_chg = np.random.default_rng().uniform(0, min(high, soc_max - soc))
+        soc_chg = np.random.default_rng().uniform(0, min(soc_swap, soc_max - soc))
         return -soc_dchg, soc_chg
 
 
@@ -137,7 +216,7 @@ def sample_duration(
     duration = location + np.random.default_rng().beta(alpha, beta) * scale
     duration = int(np.ceil(duration))
     steps = int(min(duration / dt, seq_len - idx))
-    return max(duration, dt), steps
+    return steps
 
 
 def field_current(specs):
