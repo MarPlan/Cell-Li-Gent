@@ -2,9 +2,27 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 
 from config_data import BatteryDatasheet
 from drive_cycle_bin import load_bins_from_csv
+
+
+def smooth(curr, sigma=1.0):
+    return gaussian_filter1d(curr, sigma=sigma)
+
+
+def get_smth_dynamic_current(soc_tgt, capa, steps, dt, pos_bin, neg_bin):
+    curr_field = get_field_current_1(soc_tgt, capa, steps, dt, pos_bin, neg_bin)
+    curr_static = get_static_current(soc_tgt, capa, steps, dt)
+    curr = curr_field * 0.25 + curr_static * 0.75
+    return curr
+
+
+def get_static_current(soc_tgt, capa, steps, dt):
+    curr = np.empty(steps)
+    curr[:] = soc_tgt * capa / steps / dt  # [A]
+    return curr
 
 
 def normalize_to_range(data):
@@ -135,9 +153,13 @@ def static_current(specs):
             )  # int: n_steps based on dt
 
             # curr = soc_tgt * capa / duration  # [A]
-            curr = get_field_current_1(
+            # curr = get_static_current(soc_tgt, capa, steps, dt)
+            # curr = get_field_current_1(
+            #     soc_tgt, capa, steps, dt, pos_bins, neg_bins
+            # )  # [A]
+            curr = get_smth_dynamic_current(
                 soc_tgt, capa, steps, dt, pos_bins, neg_bins
-            )  # [A]
+            )
 
             # Apply charging current and hold step
             sequence[idx : idx + steps] = curr
@@ -163,7 +185,8 @@ def static_current(specs):
         elif soc <= 1.01 * soc_min:
             mode = "chg"
 
-    return sequence
+    return smooth(sequence, 20)
+    # return sequence
 
 
 def sample_soc_tgt(mode, soc, soc_min, soc_max, soc_swap=1):

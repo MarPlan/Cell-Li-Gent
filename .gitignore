@@ -9,3 +9,5 @@ data/train/
 data/test/
 ckpt/
 misc.py
+
+!data/current/drive_cycle/
