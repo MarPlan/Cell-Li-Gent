@@ -16,11 +16,11 @@ class BatteryDatasheet:
     # dataset and no testing for unspecified values
     I_terminal: Dict[str, int] = field(
         default_factory=lambda: {
-            "chg": -128,  # [A] continous
-            "dchg": 128,  # [A] continous
-            "short_chg": -192,  # [A/s]
-            "short_dchg": 192,  # [A/s]
-            "short_time": 10,  # [s]
+            "chg": -1128,  # [A] continous
+            "dchg": 1128,  # [A] continous
+            "short_chg": -1192,  # [A/s]
+            "short_dchg": 1192,  # [A/s]
+            "short_time": 110,  # [s]
             # Parameter for current profile generation
             "soc_crit_chg": -36,
             "soc_crit_dchg": 54,
