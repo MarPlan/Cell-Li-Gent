@@ -1,4 +1,5 @@
 import os
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,14 +30,14 @@ def sample_soc_tgt(mode, soc, soc_min, soc_max, soc_swap=1):
     # Option to restrict discharge/charge in crit soc area to enforce full chg/dchg
     if mode == "chg":
         high = soc_max - soc
-        soc_chg = np.random.default_rng().uniform(0, high)
-        soc_dchg = np.random.default_rng().uniform(0, min(soc_swap, soc - soc_min))
+        soc_chg = rng.uniform(0, high)
+        soc_dchg = rng.uniform(0, min(soc_swap, soc - soc_min))
         return soc_chg, -soc_dchg
 
     else:
         high = soc - soc_min
-        soc_dchg = np.random.default_rng().uniform(0, high)
-        soc_chg = np.random.default_rng().uniform(0, min(soc_swap, soc_max - soc))
+        soc_dchg = rng.uniform(0, high)
+        soc_chg = rng.uniform(0, min(soc_swap, soc_max - soc))
         return -soc_dchg, soc_chg
 
 
@@ -69,10 +70,12 @@ def sample_duration(
 
     duration_min = abs(duration_min)
     duration_max = abs(soc_tgt * capa / curr_min)  # [s]
+    if duration_max < duration_min:
+        duration_min, duration_max = duration_max, duration_min
     alpha, beta = 1, 4  # This will skew the distribution towards the lower bound
     scale = duration_max - duration_min
     location = duration_min
-    duration = location + np.random.default_rng().beta(alpha, beta) * scale
+    duration = location + rng.beta(alpha, beta) * scale
     duration = int(np.ceil(duration))
     steps = int(min(duration / dt, seq_len - idx))
     return steps
@@ -88,7 +91,7 @@ def get_field_current(soc_tgt, capa, steps, dt, pos_bin, neg_bin):
     def generate_current(bin_data, length):
         curr = []
         while len(curr) <= length:
-            n = np.random.default_rng().integers(0, len(bin_data))
+            n = rng.integers(0, len(bin_data))
             curr.extend(bin_data[n][:, 1])
         return np.array(curr[:length])
 
@@ -175,13 +178,13 @@ def generate_current_profiles(specs, profiles):
                 idx += steps
 
                 if steps <= 1:
-                    soc_tgt = curr * steps * dt / capa
+                    soc_tgt = curr[0] * steps * dt / capa
                     soc += soc_tgt
                 else:
                     soc_tgt = np.trapz(curr, dx=dt) / capa
                     soc += soc_tgt
 
-                duration_hold = np.random.uniform(15, 30)
+                duration_hold = rng.uniform(15, 30)
                 steps_hold = int(min(duration_hold / dt, seq_len - idx))
                 sequence[idx : idx + steps_hold] = 0
                 idx += steps_hold
@@ -202,8 +205,7 @@ def generate_current_profiles(specs, profiles):
 
 
 if __name__ == "__main__":
-    # FIX: check ceil decrapted and current spike at very end of step profile
-    np.random.seed(420)
+    rng = np.random.default_rng(seed=420)
     profiles = [
         get_static_current,
         get_field_current,
@@ -215,5 +217,49 @@ if __name__ == "__main__":
         [generate_current_profiles(specs, profiles) for _ in range(n_profiles)]
     )
     output = output.reshape((-1, output.shape[-1]))
+    dd = True
 
-    # test output for specs
+    sys.path.append(os.path.abspath(".."))
+    import tests.data_limits as testing
+
+    curr_chg = -128  # [A] continous
+    curr_dchg = 128  # [A] continous
+    curr_short_chg = -192  # [A/s]
+    curr_short_dchg = 192  # [A/s]
+    curr_short_time = 10  # [s]
+    curr_soc_crit_chg = -36
+    curr_soc_crit_dchg = 54
+
+    capa = 64  # [Ah] @ SoH 100
+    capa_min = 0  # [Ah] @ SoH 100
+    capa_soc_crit_max = 0.8
+    capa_soc_crit_min = 0.2
+    capa_soc_max = 0.97
+    capa_soc_min = 0.03
+    soc_start = capa_soc_min
+
+    dt = 1
+
+    testing.check_soc(
+        output,
+        dt,
+        capa,
+        soc_start,
+        capa_soc_max,
+        capa_soc_min,
+    )
+    testing.check_bounds_current(output, curr_short_dchg, curr_short_chg)
+    testing.check_short_current(
+        output, curr_short_dchg, curr_short_chg, curr_short_time, dt
+    )
+    testing.check_crit_current(
+        output,
+        dt,
+        capa,
+        soc_start,
+        capa_soc_crit_min,
+        capa_soc_crit_max,
+        curr_soc_crit_chg,
+        curr_soc_crit_dchg,
+    )
+    t = True

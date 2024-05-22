@@ -4,13 +4,44 @@ import numpy as np
 from util.config_data import BatteryDatasheet
 
 
+def check_crit_current(
+    current,
+    dt,
+    capa,
+    soc_start,
+    soc_crit_min,
+    soc_crit_max,
+    curr_crit_min,
+    curr_crit_max,
+):
+    """ """
+    # Calculate the SoC values
+    soc = np.abs(np.cumsum(current, axis=1) * dt / 3600 / capa) + soc_start
+
+    # Find indices where SoC is outside the critical range
+    crit_soc_mask = (soc < soc_crit_min) | (soc > soc_crit_max)
+
+    # Find corresponding current values
+    crit_current = current[crit_soc_mask]
+
+    # Check if any critical current values violate the constraints
+    if np.any((np.abs(crit_current) > np.abs(curr_crit_min)) & (np.abs(crit_current) > np.abs(curr_crit_max))):
+        raise ValueError(
+            f"Critical current limit violation: Expected current to be < {curr_crit_min} or > {curr_crit_max} "
+            f"when SoC is outside the range [{soc_crit_min}, {soc_crit_max}]."
+        )
+
+    print("Passed: Critical current check")
+
+
 def check_bounds_current(current, max_limit, min_limit):
     if (current > max_limit).any() or (current < min_limit).any():
         raise ValueError(
-            f"I_terminal values should be between {min_limit} and {max_limit}"
+            f"I_terminal values should be between {min_limit} and {max_limit} "
+            f"but is min={current.min()}, max={current.max()}"
         )
 
-    print(f"Current bounds check passed: min={current.min()}, max={current.max()}")
+    print(f"Passed: Current bounds min={current.min()}, max={current.max()}")
 
 
 def check_short_current(current, short_max_limit, short_min_limit, short_time, dt):
@@ -25,19 +56,32 @@ def check_short_current(current, short_max_limit, short_min_limit, short_time, d
             raise ValueError(
                 f"I_terminal short-term values should be between "
                 f"{short_min_limit} and {short_max_limit} within any "
-                f"{short_time}s window"
+                f"{short_time}s window "
+                f"but is min={current.min()}, max={current.max()}"
             )
 
-    print(f"Short current bounds check passed for {short_time}s window")
+    print("Passed: Short current")
 
 
-def check_soc(current, dt, capa_max):
-    charge = np.trapz(current, dx=dt, axis=1) / 60 / 60  # convert to [Ah]
+def check_soc(
+    current,
+    dt,
+    capa,
+    soc_start,
+    capa_soc_max,
+    capa_soc_min,
+):
+    charge = (
+        np.abs(np.cumsum(current, axis=1) * dt / capa / 60 / 60) + soc_start
+    )  # convert to [Ah]
 
-    if (charge > capa_max).any() or (charge < -capa_max).any():
-        raise ValueError("Charge capacity outside of allowable range")
+    if (charge > capa_soc_max).any() or (charge < capa_soc_min).any():
+        raise ValueError(
+            f"Charge capacity outside of allowable range "
+            f"min={charge.min()}, max={charge.max()}"
+        )
 
-    print(f"State of charge check passed: min={charge.min()}, max={charge.max()}")
+    print(f"Passed: SoC min={charge.min()}, max={charge.max()}")
 
     return charge
 
