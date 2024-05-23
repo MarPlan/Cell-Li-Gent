@@ -3,10 +3,9 @@ import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
-
 from config_data import BatteryDatasheet
 from drive_cycle_bin import load_bins_from_csv
+from scipy.ndimage import gaussian_filter1d
 
 
 def smooth(curr, sigma=1.0):
@@ -70,14 +69,17 @@ def sample_duration(
 
     duration_min = abs(duration_min)
     duration_max = abs(soc_tgt * capa / curr_min)  # [s]
+    if time_short * curr_short >= soc_tgt:
+        duration_max = abs(soc_tgt * capa / curr_cont)
     if duration_max < duration_min:
         duration_min, duration_max = duration_max, duration_min
-    alpha, beta = 1, 4  # This will skew the distribution towards the lower bound
+    alpha, beta = 2, 8  # This will skew the distribution towards the lower bound
     scale = duration_max - duration_min
     location = duration_min
     duration = location + rng.beta(alpha, beta) * scale
     duration = int(np.ceil(duration))
-    steps = int(min(duration / dt, seq_len - idx))
+    # steps = int(min(duration / dt, seq_len - idx))
+    steps = int(duration / dt)
     return steps
 
 
@@ -122,6 +124,7 @@ def get_dynamic_current(soc_tgt, capa, steps, dt, pos_bin, neg_bin):
 
 def generate_current_profiles(specs, profiles):
     """ """
+    last_hold = 30  # last 0 duration [s]
     capa = specs.capa["max"] * 3600  # [As]
     soc_min = specs.capa["soc_min"]
     soc_max = specs.capa["soc_max"]
@@ -135,12 +138,11 @@ def generate_current_profiles(specs, profiles):
     soc_crit_min = specs.capa["soc_crit_min"]
     soc_crit_max = specs.capa["soc_crit_max"]
     time_short = specs.I_terminal["short_time"]
-    curr_min = 3.2  # [A]
-    last_hold = 30 / dt  # last 0 duration [steps]
     seq_len = specs.seq_len - last_hold
     pos_file = os.path.join("..", "data", "current", "drive_cycle", "pos_bins.csv")
     neg_file = os.path.join("..", "data", "current", "drive_cycle", "neg_bins.csv")
     pos_bins, neg_bins = load_bins_from_csv(pos_file, neg_file)
+    last_hold = last_hold / dt
     params = [
         [curr_crit_chg, curr_short_chg, curr_cont_chg],
         [curr_crit_dchg, curr_short_dchg, curr_cont_dchg],
@@ -154,10 +156,11 @@ def generate_current_profiles(specs, profiles):
         idx = 8  # start with 0 current for 4 steps (initial equilibrium)
         soc_tgt = 1
         while idx < seq_len:
-            for i, param in enumerate(params):
+            for i, _ in enumerate(params):
                 soc_tgt = sample_soc_tgt(mode, soc, soc_min, soc_max, abs(soc_tgt))[
                     i
                 ]  # (+pos) [.], (-neg) [.]
+                param = params[0] if soc_tgt > 0 else params[1]
                 steps = sample_duration(
                     *param,
                     soc,
@@ -174,7 +177,10 @@ def generate_current_profiles(specs, profiles):
 
                 curr = profile(soc_tgt, capa, steps, dt, pos_bins, neg_bins)
 
-                sequence[idx : idx + steps] = curr
+                if steps > (seq_len - idx):
+                    steps = seq_len - idx
+
+                sequence[idx : idx + steps] = curr[:steps]
                 idx += steps
 
                 if steps <= 1:
@@ -205,37 +211,37 @@ def generate_current_profiles(specs, profiles):
 
 
 if __name__ == "__main__":
+    curr_min = 0.500  # [A]
     rng = np.random.default_rng(seed=420)
     profiles = [
         get_static_current,
         get_field_current,
         get_dynamic_current,
     ]  # , dynamic_current, field_current]
-    n_profiles = 2  # Total of: n_profiles * profiles.len()
+    n_profiles = 4  # Total of: n_profiles * profiles.len()
     specs = BatteryDatasheet()
     output = -np.array(
         [generate_current_profiles(specs, profiles) for _ in range(n_profiles)]
     )
     output = output.reshape((-1, output.shape[-1]))
-    dd = True
 
     sys.path.append(os.path.abspath(".."))
     import tests.data_limits as testing
 
-    curr_chg = -128  # [A] continous
-    curr_dchg = 128  # [A] continous
-    curr_short_chg = -192  # [A/s]
-    curr_short_dchg = 192  # [A/s]
-    curr_short_time = 10  # [s]
-    curr_soc_crit_chg = -36
-    curr_soc_crit_dchg = 54
+    curr_chg = specs.I_terminal["chg"]  # [A] continous
+    curr_dchg = specs.I_terminal["dchg"]  # [A] continous
+    curr_short_chg = specs.I_terminal["short_chg"]  # [A/s]
+    curr_short_dchg = specs.I_terminal["short_dchg"]  # [A/s]
+    curr_short_time = specs.I_terminal["short_time"]  # [s]
+    curr_soc_crit_chg = specs.I_terminal["soc_crit_chg"]
+    curr_soc_crit_dchg = specs.I_terminal["soc_crit_dchg"]
 
-    capa = 64  # [Ah] @ SoH 100
-    capa_min = 0  # [Ah] @ SoH 100
-    capa_soc_crit_max = 0.8
-    capa_soc_crit_min = 0.2
-    capa_soc_max = 0.97
-    capa_soc_min = 0.03
+    capa = specs.capa["max"]  # [Ah] @ SoH 100
+    capa_min = specs.capa["min"]  # [Ah] @ SoH 100
+    capa_soc_crit_max = specs.capa["soc_crit_max"]
+    capa_soc_crit_min = specs.capa["soc_crit_min"]
+    capa_soc_max = specs.capa["soc_max"]
+    capa_soc_min = specs.capa["soc_min"]
     soc_start = capa_soc_min
 
     dt = 1
@@ -245,8 +251,8 @@ if __name__ == "__main__":
         dt,
         capa,
         soc_start,
-        capa_soc_max,
-        capa_soc_min,
+        capa_soc_max*1.001,
+        capa_soc_min*0.999,
     )
     testing.check_bounds_current(output, curr_short_dchg, curr_short_chg)
     testing.check_short_current(
@@ -263,3 +269,5 @@ if __name__ == "__main__":
         curr_soc_crit_dchg,
     )
     t = True
+
+    np.save(os.path.join("../doc/plot.npy"), output, allow_pickle=True)

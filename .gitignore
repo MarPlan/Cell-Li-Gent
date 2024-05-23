@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 
 README_draft.md
+doc/curr_plot.npy
 data/current/
 data/train/
 data/test/

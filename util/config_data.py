@@ -9,38 +9,35 @@ import numpy as np
 @dataclass
 class BatteryDatasheet:
     # INFO: CHEN2020_COMPOSITE
-
-    # Provide all data ranges for input and output!
-    # These get tested and scaled accordingly
-    # If not specified here -> min/max values for scaling from
-    # dataset and no testing for unspecified values
-    I_terminal: Dict[str, int] = field(
+    # LG INR21700 M50:
+    # https://www.dnkpower.com/wp-content/uploads/2019/02/LG-INR21700-M50-Datasheet.pdf
+    I_terminal: Dict[str, float] = field(
         default_factory=lambda: {
-            "chg": -128,  # [A] continous
-            "dchg": 128,  # [A] continous
-            "short_chg": -192,  # [A/s]
-            "short_dchg": 192,  # [A/s]
+            "chg": -3.395,  # [A] continous
+            "dchg": 7.275,  # [A] continous
+            "short_chg": -3.395,  # [A/s]
+            "short_dchg": 80/4.2,  # 19.04 [A/s]
             "short_time": 10,  # [s]
             # Parameter for current profile generation
-            "soc_crit_chg": -36,
-            "soc_crit_dchg": 54,
+            "soc_crit_chg": -1.455,
+            "soc_crit_dchg": 0.970,
         }
     )
     U_terminal: Dict[str, float] = field(
         default_factory=lambda: {
-            "max": 4.3,  # [V]
-            "min": 2.4,  # [V]
+            "max": 4.2,  # [V]
+            "min": 2.5,  # [V]
         }
     )
     T_surf: Dict[str, float] = field(
         default_factory=lambda: {
-            "max": 273.15 + 45,  # [K]
-            "min": 273.15 + 10,  # [K]
+            "max": 273.15 + 60,  # [K]
+            "min": 273.15 + 25,  # [K]
         }
     )
     capa: Dict[str, float] = field(
         default_factory=lambda: {
-            "max": 64,  # [Ah] @ SoH 100
+            "max": 5.00,  # [Ah] @ SoH 100
             "min": 0,  # [Ah] @ SoH 100
             # Parameter for current profile generation
             "soc_crit_max": 0.8,
@@ -60,7 +57,9 @@ class BatteryDatasheet:
     )
 
     def __post_init__(self):
-        self.cycle_time = int(self.capa["max"]) * 1 * 3600  # 1C as equivalent duration [s]
+        self.cycle_time = (
+            int(self.capa["max"]) * 20 * 3600
+        )  # C/20 as equivalent duration [s]
         self.seq_len = self.cycle_time // self.dt
 
 

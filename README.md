@@ -53,6 +53,28 @@ There’s a lot more interesting architectures and combinations
 thereof—hopefully, as computational costs might distribute, digging into
 these will be feasible.
 
+### Randomized Current Profiles
+
+<p float="left">
+<img src="./doc/curr_long.png" alt="Current sequence" width="45%" />
+<img src="./doc/curr_short.png" alt="Current dynamics" width="45%" />
+</p>
+
+Snapshot of the generated current profiles, which come in three
+different styles. The first one is a step profile (brown). The second
+(blue) combines charging and discharging phases from a drive cycle and
+tailored to the cell. The third one (black) is a superimposed version of
+the both, smoothed out with a Gaussian kernel. These profiles cover both
+static and dynamic aspects.
+
+Throughout the entire sequence, the profiles are designed to stay within
+the SoC ranges and current values specified in the datasheet \[5\]. To
+keep it simple, we’re focusing on a few key areas: short-term current
+(red), continuous current (orange), and critical current specific to SoC
+ranges (green). The profile guarantees a complete charge and discharge,
+with frequent zero current periods to represent dynamic conditions.
+These profiles serve as inputs for the DFN battery model.
+
 ## Result (…still brewing…)
 
 ## References
@@ -96,6 +118,15 @@ Linear-Time Sequence Modeling with Selective State Spaces.” arXiv, Dec.
 “Self-Supervised Learning from Images with a Joint-Embedding Predictive
 Architecture.” arXiv, Apr. 13, 2023. Accessed: Apr. 24, 2024.
 \[Online\]. Available: <http://arxiv.org/abs/2301.08243></span>
+
+</div>
+
+<div id="ref-LGChem2016" class="csl-entry">
+
+<span class="csl-left-margin">\[5\]
+</span><span class="csl-right-inline">LG Chem, “Datasheet INR21700 M50.”
+Aug. 23, 2016. Available:
+<https://www.dnkpower.com/wp-content/uploads/2019/02/LG-INR21700-M50-Datasheet.pdf></span>
 
 </div>
 
