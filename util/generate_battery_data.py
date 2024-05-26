@@ -8,8 +8,11 @@ from drive_cycle_bin import load_bins_from_csv
 from scipy.ndimage import gaussian_filter1d
 
 
-def smooth(curr, sigma=1.0):
-    return gaussian_filter1d(curr, sigma=sigma)
+def smooth(curr, last_hold, sigma=1.0):
+    current = gaussian_filter1d(curr, sigma=sigma)
+    current[:8] = 0
+    current[-int(last_hold):] = 0
+    return current
 
 
 def normalize_to_range(data):
@@ -29,14 +32,36 @@ def sample_soc_tgt(mode, soc, soc_min, soc_max, soc_swap=1):
     # Option to restrict discharge/charge in crit soc area to enforce full chg/dchg
     if mode == "chg":
         high = soc_max - soc
-        soc_chg = rng.uniform(0, high)
-        soc_dchg = rng.uniform(0, min(soc_swap, soc - soc_min))
+        alpha, beta = 1, 15  # This will skew the distribution towards the lower bound
+        upper, lower = high , 0
+        scale = upper - lower
+        location = lower
+        soc_chg = location + rng.beta(alpha, beta) * scale
+
+
+        upper, lower = min(soc_swap, soc - soc_min) , 0
+        scale = upper - lower
+        location = lower
+        soc_dchg = location + rng.beta(alpha, beta) * scale
+        # soc_chg = rng.uniform(0, high)
+        # soc_dchg = rng.uniform(0, min(soc_swap, soc - soc_min))
         return soc_chg, -soc_dchg
 
     else:
         high = soc - soc_min
-        soc_dchg = rng.uniform(0, high)
-        soc_chg = rng.uniform(0, min(soc_swap, soc_max - soc))
+        alpha, beta = 1, 15  # This will skew the distribution towards the lower bound
+        upper, lower = high , 0
+        scale = upper - lower
+        location = lower
+        soc_dchg = location + rng.beta(alpha, beta) * scale
+
+
+        upper, lower = min(soc_swap, abs(soc_max - soc)) , 0
+        scale = upper - lower
+        location = lower
+        soc_chg = location + rng.beta(alpha, beta) * scale
+        # soc_dchg = rng.uniform(0, high)
+        # soc_chg = rng.uniform(0, min(soc_swap, abs(soc_max - soc)))
         return -soc_dchg, soc_chg
 
 
@@ -55,41 +80,47 @@ def sample_duration(
     seq_len,
     idx,
 ):
+    duration_max = abs(soc_tgt * capa / curr_min)  # [s]
+
     if soc < soc_crit_min or soc > soc_crit_max:
         duration_min = soc_tgt * capa / curr_crit
 
     elif soc + soc_tgt > soc_crit_max or soc + soc_tgt < soc_crit_min:
         duration_min = soc_tgt * capa / curr_crit
 
-    elif time_short * curr_short >= soc_tgt:
-        duration_min = soc_tgt * capa / curr_short
-
+    elif abs(time_short * curr_short/3600) >= abs(soc_tgt):
+        duration_min = min(abs(soc_tgt * capa / curr_short), time_short)
+        duration_max= time_short
     else:
         duration_min = soc_tgt * capa / curr_cont
 
     duration_min = abs(duration_min)
-    duration_max = abs(soc_tgt * capa / curr_min)  # [s]
-    if time_short * curr_short >= soc_tgt:
-        duration_max = abs(soc_tgt * capa / curr_cont)
     if duration_max < duration_min:
         duration_min, duration_max = duration_max, duration_min
-    alpha, beta = 2, 8  # This will skew the distribution towards the lower bound
+    alpha, beta = 1, 15  # This will skew the distribution towards the lower bound
     scale = duration_max - duration_min
     location = duration_min
     duration = location + rng.beta(alpha, beta) * scale
     duration = int(np.ceil(duration))
-    # steps = int(min(duration / dt, seq_len - idx))
     steps = int(duration / dt)
     return steps
 
 
-def get_static_current(soc_tgt, capa, steps, dt, pos_bins=None, neg_bins=None):
+def get_static_current(soc_tgt, capa, steps, dt, curr_short, pos_bins=None, neg_bins=None):
+    if steps == 0:
+        curr = 0
+        return curr
     curr = np.empty(steps)
-    curr[:] = soc_tgt * capa / steps / dt  # [A]
+    if soc_tgt > 0:
+        curr[:] = min(soc_tgt * capa / steps / dt, -curr_short)  # [A]
+    elif soc_tgt<0:
+        curr[:] = max(soc_tgt * capa / steps / dt, -curr_short)  # [A]
+    else:
+        curr[:] = 0
     return curr
 
 
-def get_field_current(soc_tgt, capa, steps, dt, pos_bin, neg_bin):
+def get_field_current(soc_tgt, capa, steps, dt, curr_short, pos_bin, neg_bin):
     def generate_current(bin_data, length):
         curr = []
         while len(curr) <= length:
@@ -103,11 +134,11 @@ def get_field_current(soc_tgt, capa, steps, dt, pos_bin, neg_bin):
 
     if soc_tgt > 0:
         curr = generate_current(pos_bin, steps)
-        curr_max = soc_tgt * capa / steps / dt  # [A]
+        curr_max = min(soc_tgt * capa / steps / dt, -curr_short)  # [A]
         curr = normalize_to_range(np.abs(curr)) * curr_max
     elif soc_tgt < 0:
         curr = generate_current(neg_bin, steps)
-        curr_max = soc_tgt * capa / steps / dt  # [A]
+        curr_max = max(soc_tgt * capa / steps / dt, -curr_short)  # [A]
         curr = normalize_to_range(np.abs(curr)) * curr_max
     else:
         curr = np.zeros(steps)
@@ -115,10 +146,10 @@ def get_field_current(soc_tgt, capa, steps, dt, pos_bin, neg_bin):
     return curr
 
 
-def get_dynamic_current(soc_tgt, capa, steps, dt, pos_bin, neg_bin):
-    curr_field = get_field_current(soc_tgt, capa, steps, dt, pos_bin, neg_bin)
-    curr_static = get_static_current(soc_tgt, capa, steps, dt)
-    curr = curr_field * 0.4 + curr_static * 0.6
+def get_dynamic_current(soc_tgt, capa, steps, dt, curr_short, pos_bin, neg_bin):
+    curr_field = get_field_current(soc_tgt, capa, steps, dt, curr_short, pos_bin, neg_bin)
+    curr_static = get_static_current(soc_tgt, capa, steps, dt,curr_short)
+    curr = curr_field * 0.3 + curr_static * 0.7
     return curr
 
 
@@ -151,8 +182,8 @@ def generate_current_profiles(specs, profiles):
 
     for profile in profiles:
         sequence = np.zeros(specs.seq_len)  # [steps]
-        mode = "chg"  # chg, dchg
-        soc = specs.capa["soc_min"]
+        mode = "dchg"  # chg, dchg
+        soc = soc_start
         idx = 8  # start with 0 current for 4 steps (initial equilibrium)
         soc_tgt = 1
         while idx < seq_len:
@@ -175,7 +206,7 @@ def generate_current_profiles(specs, profiles):
                     idx,
                 )  # int: n_steps based on dt
 
-                curr = profile(soc_tgt, capa, steps, dt, pos_bins, neg_bins)
+                curr = profile(soc_tgt, capa, steps, dt, param[1], pos_bins, neg_bins)
 
                 if steps > (seq_len - idx):
                     steps = seq_len - idx
@@ -187,10 +218,10 @@ def generate_current_profiles(specs, profiles):
                     soc_tgt = curr[0] * steps * dt / capa
                     soc += soc_tgt
                 else:
-                    soc_tgt = np.trapz(curr, dx=dt) / capa
+                    soc_tgt = np.cumsum(curr)[-1] * dt / capa
                     soc += soc_tgt
 
-                duration_hold = rng.uniform(15, 30)
+                duration_hold = rng.uniform(45, 90)
                 steps_hold = int(min(duration_hold / dt, seq_len - idx))
                 sequence[idx : idx + steps_hold] = 0
                 idx += steps_hold
@@ -204,14 +235,15 @@ def generate_current_profiles(specs, profiles):
                 mode = "chg"
 
         if profile == get_dynamic_current:
-            sequence = smooth(sequence, 200)
+            sequence = smooth(sequence,last_hold,150)
 
         sequences.append(sequence)
     return sequences
 
 
 if __name__ == "__main__":
-    curr_min = 0.500  # [A]
+    soc_start = 1.0
+    curr_min = 0.50  # [A]
     rng = np.random.default_rng(seed=420)
     profiles = [
         get_static_current,
@@ -242,7 +274,6 @@ if __name__ == "__main__":
     capa_soc_crit_min = specs.capa["soc_crit_min"]
     capa_soc_max = specs.capa["soc_max"]
     capa_soc_min = specs.capa["soc_min"]
-    soc_start = capa_soc_min
 
     dt = 1
 
@@ -251,7 +282,7 @@ if __name__ == "__main__":
         dt,
         capa,
         soc_start,
-        capa_soc_max*1.001,
+        max(capa_soc_max, soc_start)*1.001,
         capa_soc_min*0.999,
     )
     testing.check_bounds_current(output, curr_short_dchg, curr_short_chg)
@@ -270,4 +301,7 @@ if __name__ == "__main__":
     )
     t = True
 
-    np.save(os.path.join("../doc/plot.npy"), output, allow_pickle=True)
+    np.save(os.path.join("../data/current/test_dfn.npy"), output, allow_pickle=True)
+
+    plt.plot(np.cumsum(-output[0])/3600/(capa * soc_start) + soc_start)
+    plt.show()

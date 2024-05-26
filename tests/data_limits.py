@@ -15,16 +15,13 @@ def check_crit_current(
     curr_crit_max,
 ):
     # Calculate the SoC values
-    soc = np.abs(np.cumsum(current, axis=1) * dt / 3600 / capa) + soc_start
+    soc = (soc_start  - (np.cumsum(current, axis=1)* dt/3600/capa))
     # Find indices where SoC is outside the critical range
     crit_soc_mask = (soc < soc_crit_min) | (soc > soc_crit_max)
     # Find corresponding current values
     crit_current = current[crit_soc_mask]
     # Check if any critical current values violate the constraints
-    if np.any(
-        (crit_current < curr_crit_min)
-        & (crit_current > curr_crit_max)
-    ):
+    if np.any((crit_current < curr_crit_min) & (crit_current > curr_crit_max)):
         raise ValueError(
             f"Critical current limit violation: Expected current to be "
             f"< {curr_crit_min} or > {curr_crit_max} "
@@ -67,9 +64,8 @@ def check_soc(
     capa_soc_max,
     capa_soc_min,
 ):
-    charge = (
-        np.abs(np.cumsum(current, axis=1) * dt / capa / 60 / 60) + soc_start
-    )  # convert to [Ah]
+    charge = (soc_start  - (np.cumsum(current, axis=1)* dt/3600/capa))
+    # convert to [Ah]
     if (charge > capa_soc_max).any() or (charge < capa_soc_min).any():
         raise ValueError(
             f"Charge capacity outside of allowable range "

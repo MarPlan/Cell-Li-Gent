@@ -8,7 +8,7 @@ import numpy as np
 
 @dataclass
 class BatteryDatasheet:
-    # INFO: CHEN2020_COMPOSITE
+    # INFO: CHEN2020
     # LG INR21700 M50:
     # https://www.dnkpower.com/wp-content/uploads/2019/02/LG-INR21700-M50-Datasheet.pdf
     I_terminal: Dict[str, float] = field(
@@ -37,13 +37,13 @@ class BatteryDatasheet:
     )
     capa: Dict[str, float] = field(
         default_factory=lambda: {
-            "max": 5.00,  # [Ah] @ SoH 100
+            "max": 5.0,  # [Ah] @ SoH 100
             "min": 0,  # [Ah] @ SoH 100
             # Parameter for current profile generation
             "soc_crit_max": 0.8,
             "soc_crit_min": 0.2,
-            "soc_max": 0.97,
-            "soc_min": 0.03,
+            "soc_max": 0.98,
+            "soc_min": 0.01,
         }
     )
     # Parameter for current profile generation
