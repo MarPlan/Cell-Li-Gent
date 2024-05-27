@@ -53,27 +53,37 @@ There’s a lot more interesting architectures and combinations
 thereof—hopefully, as computational costs might distribute, digging into
 these will be feasible.
 
-### Randomized Current Profiles
+### Randomized Data Profiles
 
-<p float="left">
-<img src="./doc/curr_long.png" alt="Current sequence" width="45%" />
-<img src="./doc/curr_short.png" alt="Current dynamics" width="45%" />
-</p>
-
-Snapshot of the generated current profiles, which come in three
-different styles. The first one is a step profile (brown). The second
-(blue) combines charging and discharging phases from a drive cycle and
-tailored to the cell. The third one (black) is a superimposed version of
-the both, smoothed out with a Gaussian kernel. These profiles cover both
-static and dynamic aspects.
-
+Snapshot of the generated profiles, which come in three different
+styles. The first one is a step profile (blue). The second (green)
+combines charging and discharging phases from a drive cycle and tailored
+to the cell. The third one (red) is a superimposed version of the both,
+smoothed out with a Gaussian kernel. These profiles are supposed to
+cover static and dynamic aspects. ![profiles](./doc/profiles_plot.png)
 Throughout the entire sequence, the profiles are designed to stay within
 the SoC ranges and current values specified in the datasheet \[5\]. To
-keep it simple, we’re focusing on a few key areas: short-term current
-(red), continuous current (orange), and critical current specific to SoC
-ranges (green). The profile guarantees a complete charge and discharge,
-with frequent zero current periods to represent dynamic conditions.
-These profiles serve as inputs for the DFN battery model.
+keep it simple, we’re focusing on a few key areas: short-term current,
+continuous current, and critical current specific to SoC ranges. The
+profile guarantees a complete charge and discharge, with zero current
+periods for relaxation. ![profiles3d](./doc/data_3d.png) All these
+profiles are based on a random generated current profile with datasheet
+based constraints. The 3d illustration shows where the highest sample
+density is and also what soc is present at a given point. The full
+training dataset for the AI models is based on this approach. There are
+almost limitless options to refine the data generation but this might be
+addressed after a first evaluation.
+
+Inputs for the training are:
+
+- Terminal Current
+- Terminal Voltage
+- X-Avg. Temperature
+
+Prediction parameters are:
+
+- State of Charge
+- tbd…
 
 ## Result (…still brewing…)
 

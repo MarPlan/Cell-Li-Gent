@@ -1,6 +1,6 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import pybamm
-import matplotlib.pyplot as plt
 
 from util.config_data import BatteryDatasheet
 
@@ -29,11 +29,11 @@ if __name__ == "__main__":
     parameter_values = pybamm.ParameterValues("Chen2020")
     options = {"cell geometry": "arbitrary", "thermal": "lumped"}
     model = pybamm.lithium_ion.DFN(options)
-    curr = np.load("data/current/test_dfn.npy", allow_pickle=True)[0, :50_000]
+    curr = np.load("data/current/test_dfn.npy", allow_pickle=True)[2, :239_000]
     t = np.arange(0, curr.shape[0], specs.dt)
     cycle = np.column_stack([t, curr])
-    model_init = pybamm.load("model_init.pkl")
-    model.set_initial_conditions_from(model_init, inplace=True)
+    # model_init = pybamm.load("model_init.pkl")
+    # model.set_initial_conditions_from(model_init, inplace=True)
 
     # create interpolant
     current_interpolant = pybamm.Interpolant(cycle[:, 0], cycle[:, 1], pybamm.t)
@@ -50,6 +50,7 @@ if __name__ == "__main__":
         ),  # experiment=experiment
     )
     solution = sim.solve()
+    solution.save('profile_2.pkl')
 
     outputs = [
         "Current [A]",

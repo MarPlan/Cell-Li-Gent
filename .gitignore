@@ -5,9 +5,7 @@ __pycache__/
 
 README_draft.md
 doc/curr_plot.npy
-data/current/
-data/train/
-data/test/
+data/
 ckpt/
 misc.py
 
