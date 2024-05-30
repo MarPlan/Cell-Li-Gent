@@ -1,8 +1,10 @@
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pybamm
 
-from util.config_data import BatteryDatasheet
+from config_data import BatteryDatasheet
 
 if __name__ == "__main__":
     # parameter_values = pybamm.ParameterValues("Chen2020")

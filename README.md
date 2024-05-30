@@ -2,18 +2,18 @@
 
 A data-driven approach for multivariate time series prediction, aiming
 to simplify the battery modeling process and cut down on expensive
-battery tests. By fully harnessing the data, I’m using a randomized
-protocol to create a synthetic dataset via electrochemical simulation
-(DFN using [PyBaMM](https://github.com/pybamm-team/PyBaMM) \[1\]). This
-dataset then serves as fuel to train neural networks. Building on what I
-laid out in my [thesis](/doc/thesis.pdf) proposal, the goal is to not
-just predict battery behavior but to also uncover more efficient ways to
+battery tests. Using a randomized protocol to create a synthetic dataset
+via electrochemical simulation (DFN from
+[PyBaMM](https://github.com/pybamm-team/PyBaMM) \[1\]). This dataset
+then serves as fuel to train the neural networks. Extending what I laid
+out in my [thesis](/doc/thesis.pdf) proposal, the goal is to not just
+predict battery behavior but to also uncover more efficient ways to
 operate batteries using an intelligent agent.
 
 Here’s a snapshot from my [thesis](/doc/thesis.pdf) where I compared a
 classic method against a neural network that doesn’t go overboard on the
 parameters (~350k) but still delivers performance that’s pretty much on
-par with the traditional model:
+par with the traditional model.
 
 | Dataset | Battery-Model             | MSE    | MAE    |
 |---------|---------------------------|--------|--------|
@@ -22,7 +22,12 @@ par with the traditional model:
 | NMC     | Data-Driven (Transformer) | 8.3e-5 | 8.0e-3 |
 | NMC     | Classical (ECM)           | 1.0e-7 | 2.9e-4 |
 
-## Overview (…working on it!)
+To be fair, the ECM (w/o Kalman-Filter) had as input only the current
+values where the neural network got current, terminal voltage and
+surface temperature. The predicted output was State-of-Charge,
+respectively.
+
+## Overview (working on it!)
 
 The [model](/model) directory has the designs I’m considering:
 
@@ -55,37 +60,44 @@ these will be feasible.
 
 ### Randomized Data Profiles
 
-Snapshot of the generated profiles, which come in three different
-styles. The first one is a step profile (blue). The second (green)
-combines charging and discharging phases from a drive cycle and tailored
-to the cell. The third one (red) is a superimposed version of the both,
-smoothed out with a Gaussian kernel. These profiles are supposed to
-cover static and dynamic aspects. ![profiles](./doc/profiles_plot.png)
-Throughout the entire sequence, the profiles are designed to stay within
-the SoC ranges and current values specified in the datasheet \[5\]. To
-keep it simple, we’re focusing on a few key areas: short-term current,
-continuous current, and critical current specific to SoC ranges. The
-profile guarantees a complete charge and discharge, with zero current
-periods for relaxation. ![profiles3d](./doc/data_3d.png) All these
-profiles are based on a random generated current profile with datasheet
-based constraints. The 3d illustration shows where the highest sample
-density is and also what soc is present at a given point. The full
-training dataset for the AI models is based on this approach. There are
-almost limitless options to refine the data generation but this might be
-addressed after a first evaluation.
+Snapshot of the input space for the neural network, based on the
+parameters what are measured in a real world scenario:
 
-Inputs for the training are:
-
-- Terminal Current
+- Terminal Current (generated randomly)
 - Terminal Voltage
-- X-Avg. Temperature
+- Surface Temperature
 
-Prediction parameters are:
+The current profiles come in three different variations: first is a step
+profile (blue). The second (green) combines charging and discharging
+phases from a drive cycle and tailored to the cell. The third one (red)
+is a superimposed version of the both, smoothed out with a Gaussian
+kernel. These profiles are supposed to cover static and dynamic aspects.
+![profiles](./doc/profiles_plot.png) Throughout the entire sequence, the
+profiles are designed to stay within the specifications of the datasheet
+\[5\]. For the seak of simplicity I am focusing on short-term current
+(10s), continuous current, and critical current specific to SoC
+ranges(SoC\<0.2, SoC\>0.8). A single profile guarantees one full charge
+and discharge, with a zero current intervals for equilibrium
+information. ![profiles3d](./doc/data_3d.png) The plane colors showing
+the sample density \[low=yellow, high=red\] and the limits for each
+input dimension. The surface plot coloring SoC values \[0=blue,
+1=orange\] at a given input \[I, U, T\]. The full dataset for the neural
+networks is based on this approach.
+
+### Outputs
+
+Making model only current dependent: (…success not guaranteed)
+
+- Terminal Voltage
+- Surface Temperature
+
+Getting additional information:
 
 - State of Charge
-- tbd…
+- Open Circuit Voltage
+- Battery Internal Temperature
 
-## Result (…still brewing…)
+## Results (…still brewing…)
 
 ## References
 

@@ -213,6 +213,18 @@ if __name__ == "__main__":
     os.chdir('..')
 
     capa = 5
+
+    # 'Discharge capacity [A.h]'
+    #
+    # 'X-averaged cell temperature [C]'
+    # 'Volume-averaged cell temperature [C]'
+    # 'Cell temperature [C]'
+    #
+    # 'Positive electrode open-circuit potential [V]'
+    # 'Negative electrode open-circuit potential [V]'
+    # 'X-averaged negative electrode open-circuit potential [V]'
+    # 'X-averaged positive electrode open-circuit potential [V]'
+
     outputs = [
         "Current [A]",
         "Terminal voltage [V]",
@@ -300,9 +312,9 @@ if __name__ == "__main__":
         "X-averaged cell temperature [C]",
         "Discharge capacity [A.h]",
     ]
-    profile_0 = pybamm.load("profile_0.pkl")
-    profile_1 = pybamm.load("profile_1.pkl")
-    profile_2 = pybamm.load("profile_2.pkl")
+    profile_0 = pybamm.load("data/profile_0.pkl")
+    profile_1 = pybamm.load("data/profile_1.pkl")
+    profile_2 = pybamm.load("data/profile_2.pkl")
     # Adjust the discharge capacity for profile_0
     profile_0 = {key: (profile_0[key].entries / capa if key == outputs[-1] else profile_0[key].entries) for key in outputs}
     profile_1 = {key: (profile_1[key].entries / capa if key == outputs[-1] else profile_1[key].entries) for key in outputs}
@@ -342,7 +354,7 @@ if __name__ == "__main__":
             axs[row, 1].set_title('Cropped Profiles')
     # Save the figure with appropriate dimensions and dpi
     fig.tight_layout()
-    plt.savefig('profiles_plot.png', dpi=300)
+    plt.savefig('doc/profiles_plot.png', dpi=300)
     plt.show()
 
 
