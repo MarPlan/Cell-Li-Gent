@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
     os.chdir("..")
     specs = BatteryDatasheet()
-    curr = np.load("data/current/test_dfn.npy", allow_pickle=True)[0, :239_000]
+    curr = np.load("data/current/test_dfn.npy", allow_pickle=True)[1, :239_000]
     t = np.arange(0, curr.shape[0], specs.dt)
     cycle = np.column_stack([t, curr])
     current_interpolant = pybamm.Interpolant(cycle[:, 0], cycle[:, 1], pybamm.t)
@@ -151,7 +151,7 @@ if __name__ == "__main__":
     )
     solution = sim.solve()
 
-    solution.save("data/profile_0.pkl")
+    solution.save("data/profile_1.pkl")
 
     outputs = [
         "Current [A]",
