@@ -1,17 +1,20 @@
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
+
 from config_data import BatteryDatasheet
 from drive_cycle_bin import load_bins_from_csv
-from scipy.ndimage import gaussian_filter1d
 
 
 def smooth(curr, last_hold, sigma=1.0):
     current = gaussian_filter1d(curr, sigma=sigma)
     current[:8] = 0
-    current[-int(last_hold):] = 0
+    current[-int(last_hold) :] = 0
     return current
 
 
@@ -33,13 +36,12 @@ def sample_soc_tgt(mode, soc, soc_min, soc_max, soc_swap=1):
     if mode == "chg":
         high = soc_max - soc
         alpha, beta = 1, 15  # This will skew the distribution towards the lower bound
-        upper, lower = high , 0
+        upper, lower = high, 0
         scale = upper - lower
         location = lower
         soc_chg = location + rng.beta(alpha, beta) * scale
 
-
-        upper, lower = min(soc_swap, soc - soc_min) , 0
+        upper, lower = min(soc_swap, soc - soc_min), 0
         scale = upper - lower
         location = lower
         soc_dchg = location + rng.beta(alpha, beta) * scale
@@ -50,13 +52,12 @@ def sample_soc_tgt(mode, soc, soc_min, soc_max, soc_swap=1):
     else:
         high = soc - soc_min
         alpha, beta = 1, 15  # This will skew the distribution towards the lower bound
-        upper, lower = high , 0
+        upper, lower = high, 0
         scale = upper - lower
         location = lower
         soc_dchg = location + rng.beta(alpha, beta) * scale
 
-
-        upper, lower = min(soc_swap, abs(soc_max - soc)) , 0
+        upper, lower = min(soc_swap, abs(soc_max - soc)), 0
         scale = upper - lower
         location = lower
         soc_chg = location + rng.beta(alpha, beta) * scale
@@ -88,9 +89,9 @@ def sample_duration(
     elif soc + soc_tgt > soc_crit_max or soc + soc_tgt < soc_crit_min:
         duration_min = soc_tgt * capa / curr_crit
 
-    elif abs(time_short * curr_short/3600) >= abs(soc_tgt):
+    elif abs(time_short * curr_short / 3600) >= abs(soc_tgt):
         duration_min = min(abs(soc_tgt * capa / curr_short), time_short)
-        duration_max= time_short
+        duration_max = time_short
     else:
         duration_min = soc_tgt * capa / curr_cont
 
@@ -106,14 +107,16 @@ def sample_duration(
     return steps
 
 
-def get_static_current(soc_tgt, capa, steps, dt, curr_short, pos_bins=None, neg_bins=None):
+def get_static_current(
+    soc_tgt, capa, steps, dt, curr_short, pos_bins=None, neg_bins=None
+):
     if steps == 0:
         curr = 0
         return curr
     curr = np.empty(steps)
     if soc_tgt > 0:
         curr[:] = min(soc_tgt * capa / steps / dt, -curr_short)  # [A]
-    elif soc_tgt<0:
+    elif soc_tgt < 0:
         curr[:] = max(soc_tgt * capa / steps / dt, -curr_short)  # [A]
     else:
         curr[:] = 0
@@ -147,14 +150,19 @@ def get_field_current(soc_tgt, capa, steps, dt, curr_short, pos_bin, neg_bin):
 
 
 def get_dynamic_current(soc_tgt, capa, steps, dt, curr_short, pos_bin, neg_bin):
-    curr_field = get_field_current(soc_tgt, capa, steps, dt, curr_short, pos_bin, neg_bin)
-    curr_static = get_static_current(soc_tgt, capa, steps, dt,curr_short)
+    curr_field = get_field_current(
+        soc_tgt, capa, steps, dt, curr_short, pos_bin, neg_bin
+    )
+    curr_static = get_static_current(soc_tgt, capa, steps, dt, curr_short)
     curr = curr_field * 0.3 + curr_static * 0.7
     return curr
 
 
 def generate_current_profiles(specs, profiles):
     """ """
+    rng = np.random.default_rng(seed=420)
+    soc_start = 1.0
+    curr_min = 0.50  # [A]
     last_hold = 30  # last 0 duration [s]
     capa = specs.capa["max"] * 3600  # [As]
     soc_min = specs.capa["soc_min"]
@@ -235,26 +243,56 @@ def generate_current_profiles(specs, profiles):
                 mode = "chg"
 
         if profile == get_dynamic_current:
-            sequence = smooth(sequence,last_hold,150)
+            sequence = smooth(sequence, last_hold, 150)
 
         sequences.append(sequence)
     return sequences
 
 
+# def generate_profile_wrapper(specs, profiles, _):
+def generate_profile_wrapper(_):
+    return generate_current_profiles(specs, profiles)
+
+
+def initialize_globals(_specs, _profiles, _seed):
+    global specs, profiles, rng
+    specs = _specs
+    profiles = _profiles
+    # Use a different seed for each worker process by combining the base seed and worker_id
+    rng = np.random.default_rng(seed=_seed + os.getpid())
+
+
+# Global variables
+# specs = None
+# profiles = None
+# rng = None
+# rng = np.random.default_rng(seed=420)
+
 if __name__ == "__main__":
+    base_seed = 420
     soc_start = 1.0
     curr_min = 0.50  # [A]
-    rng = np.random.default_rng(seed=420)
+    # rng = np.random.default_rng(seed=420)
     profiles = [
         get_static_current,
         get_field_current,
         get_dynamic_current,
     ]  # , dynamic_current, field_current]
-    n_profiles = 4  # Total of: n_profiles * profiles.len()
+    n_profiles = 1000  # Total of: n_profiles * profiles.len()
     specs = BatteryDatasheet()
-    output = -np.array(
-        [generate_current_profiles(specs, profiles) for _ in range(n_profiles)]
-    )
+
+    # Create partial function that includes specs and profiles
+    # generate_profile_with_params = partial(generate_profile_wrapper, specs, profiles)
+
+    with ProcessPoolExecutor(
+        initializer=initialize_globals, initargs=(specs, profiles, base_seed)
+    ) as executor:
+        results = list(executor.map(generate_profile_wrapper, range(n_profiles)))
+
+    output = -np.array(results)
+    # output = -np.array(
+    #     [generate_current_profiles(specs, profiles) for _ in range(n_profiles)]
+    # )
     output = output.reshape((-1, output.shape[-1]))
 
     sys.path.append(os.path.abspath(".."))
@@ -282,8 +320,8 @@ if __name__ == "__main__":
         dt,
         capa,
         soc_start,
-        max(capa_soc_max, soc_start)*1.001,
-        capa_soc_min*0.999,
+        max(capa_soc_max, soc_start) * 1.001,
+        capa_soc_min * 0.999,
     )
     testing.check_bounds_current(output, curr_short_dchg, curr_short_chg)
     testing.check_short_current(
@@ -301,7 +339,7 @@ if __name__ == "__main__":
     )
     t = True
 
-    np.save(os.path.join("../data/current/test_dfn.npy"), output, allow_pickle=True)
+    np.save(os.path.join("../data/current/train_dfn.npy"), output, allow_pickle=True)
 
-    plt.plot(np.cumsum(-output[0])/3600/(capa * soc_start) + soc_start)
+    plt.plot(np.cumsum(-output[0]) / 3600 / (capa * soc_start) + soc_start)
     plt.show()

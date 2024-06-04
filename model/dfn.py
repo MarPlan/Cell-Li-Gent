@@ -149,16 +149,16 @@ if __name__ == "__main__":
             mode="fast", extra_options_setup={"max_step_size": 1}
         ),
     )
+
     solution = sim.solve()
-
-    solution.save("data/profile_1.pkl")
-
     outputs = [
         "Current [A]",
         "Terminal voltage [V]",
         "Discharge capacity [A.h]",
         "X-averaged cell temperature [C]",
         "Volume-averaged surface temperature [C]",
+        "Battery open-circuit voltage [V]",
     ]
     pybamm.dynamic_plot(solution, outputs)
-    tt = 5
+
+    solution.save("data/profile_1.pkl")
