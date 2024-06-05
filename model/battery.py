@@ -120,11 +120,12 @@ class LumpedSurface(Lumped):
         self.initial_conditions = {T_surf: self.param.T_init}
 
 
-def solve_dfn_simulation(idx):
+def solve_simulation(idx):
     parameter_values = pybamm.ParameterValues("Chen2020")
     parameter_values["Total heat transfer coefficient [W.m-2.K-1]"] = 2
     options = {"cell geometry": "arbitrary"}
-    model = pybamm.lithium_ion.DFN(options, build=False)
+    # model = pybamm.lithium_ion.DFN(options, build=False)
+    model = pybamm.lithium_ion.SPMe(options, build=False)
     model.submodels["thermal"] = Lumped(model.param, options)
     model.submodels["thermal_surf"] = LumpedSurface(model.param, options)
     model.build_model()
@@ -164,8 +165,10 @@ def solve_dfn_simulation(idx):
         ]
     )
 
-    np.save(f"data/train/dfn_{idx}.npy", data.T)
-    print(f"Successfully Saved: Process:{os.getpid()}, profile:{idx}/{current.shape[0]}")
+    np.save(f"data/train/spme_{idx}.npy", data.T)
+    print(
+        f"Successfully Saved: Process:{os.getpid()}, profile:{idx}/{current.shape[0]}"
+    )
 
 
 def initialize_globals(_current):
@@ -181,51 +184,12 @@ if __name__ == "__main__":
 
     os.chdir("..")
     specs = BatteryDatasheet()
-    current = np.load("data/current/train_dfn.npy")[:, :20_000]
-
-    # parameter_values = pybamm.ParameterValues("Chen2020")
-    # parameter_values["Total heat transfer coefficient [W.m-2.K-1]"] = 2
-    # options = {"cell geometry": "arbitrary"}
-    # model = pybamm.lithium_ion.DFN(options, build=False)
-    # model.submodels["thermal"] = Lumped(model.param, options)
-    # model.submodels["thermal_surf"] = LumpedSurface(model.param, options)
-    # model.build_model()
-
-    # for i in range(current.shape[0]):
-    #     solve_dfn_simulation(i)
+    current = np.load("data/current/current_profiles.npy")
 
     with ProcessPoolExecutor(
-        max_workers=4,
+        max_workers=3,
         initializer=initialize_globals,
         initargs=(current,),
     ) as executor:
-        results = list(executor.map(solve_dfn_simulation, range(current.shape[0])))
+        results = list(executor.map(solve_simulation, range(291, current.shape[0])))
 
-    # import h5py
-    # data_dir = os.path.abspath("../data/train/dfn_data.h5")
-    # # Open HDF5 file to write data
-    # with h5py.File(data_dir, "a") as file:
-    #     print("Creating new dataset")
-    #     dataset = file.create_dataset(
-    #         "dfn_training",
-    #         data=data,
-    #         maxshape=(None, data.shape[1], data.shape[2]),
-    #         dtype=float,
-    #     )
-    #
-    #     # Add attributes to describe each dimension
-    #     dataset.attrs[
-    #         "info"
-    #     ] = """Dataset contains synthetic battery data from a DFN simulation
-    #     dim[0] = n_series (number of series)
-    #     dim[1] = seq_len: dt = 1s (sequence length)
-    #     dim[2] = inputs : I_terminal [A], U_terminal [V], T_surface [C],
-    #              outputs: SoC [.]       , T_core [C]    , OCV [V]"""
-    #     dataset.attrs["dim_2"] = (
-    #         "Inp_I_terminal [A]",
-    #         "Inp_U_terminal [V]",
-    #         "Inp_T_surface [C]",
-    #         "Out_SoC [.]",
-    #         "Out_T_core [C]",
-    #         "Out_OCV [V]",
-    #     )

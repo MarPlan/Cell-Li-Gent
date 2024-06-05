@@ -144,7 +144,7 @@ def create_dummy_dataset():
         # Add attributes to describe each dimension
         dataset.attrs[
             "info"
-        ] = """Dataset contains synthetic battery data from a DFN simulation
+        ] = """Dataset contains synthetic battery data from a SPMe simulation
         dim[0] = n_series (number of series)
         dim[1] = seq_len: dt = 1s (sequence length)
         dim[2] = inputs : I_terminal [A], U_terminal [V], T_surface [K],

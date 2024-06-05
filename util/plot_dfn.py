@@ -213,7 +213,7 @@ if __name__ == "__main__":
     import numpy as np
     import pybamm
     from matplotlib.colors import Normalize
-    from model.dfn import Lumped, LumpedSurface
+    from model.battery import Lumped, LumpedSurface
     from scipy.interpolate import griddata
     from scipy.ndimage import gaussian_filter
     from scipy.stats import gaussian_kde

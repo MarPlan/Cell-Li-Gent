@@ -15,6 +15,7 @@ import torch
 import wandb
 
 from model.transformer import ModelArgs, Transformer
+from tests.data_limits import verify_dataset_limits
 from util.prepare_data import BatteryData
 
 # -----------------------------------------------------------------------------
@@ -30,8 +31,8 @@ wandb_log = False  # disabled by default
 wandb_project = "Cell-Li-Gent"
 wandb_run_name = "transformer"  # 'run' + str(time.time())
 # data
-dataset = "random_scaled"
-data_file = os.path.abspath("data/train/dummy_battery_data.h5")
+dataset = "spme_training"
+data_file = os.path.abspath("data/train/battery_data.h5")
 gradient_accumulation_steps = 1 * 4  # used to simulate larger batch sizes
 batch_size = 32  # if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 256
@@ -115,6 +116,7 @@ iter_num = 0
 best_val_loss = 1e9
 # -----------------------------------------------------------------------------
 # data init
+verify_dataset_limits(data_file = data_file, dataset=dataset)
 train_data = BatteryData(data_file, dataset, batch_size, seq_len, device)
 # model init
 model_args = ModelArgs( n_layer=n_layer, n_heads=n_heads, dim_model=dim_model, seq_len=seq_len, max_seq_len=seq_len, bias=bias, dropout=dropout)  # start with model_args from command line

@@ -3,7 +3,7 @@
 A data-driven approach for multivariate time series prediction, aiming
 to simplify the battery modeling process and cut down on expensive
 battery tests. Using a randomized protocol to create a synthetic dataset
-via electrochemical simulation (DFN from
+via electrochemical simulation (SPMe from
 [PyBaMM](https://github.com/pybamm-team/PyBaMM) \[1\]). This dataset
 then serves as fuel to train the neural networks. Extending what I laid
 out in my [thesis](/doc/thesis.pdf) proposal, the goal is to not just

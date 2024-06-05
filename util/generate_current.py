@@ -339,7 +339,7 @@ if __name__ == "__main__":
     )
     t = True
 
-    np.save(os.path.join("../data/current/train_dfn.npy"), output, allow_pickle=True)
+    np.save(os.path.join("../data/current/current_profiles.npy"), output, allow_pickle=True)
 
     plt.plot(np.cumsum(-output[0]) / 3600 / (capa * soc_start) + soc_start)
     plt.show()

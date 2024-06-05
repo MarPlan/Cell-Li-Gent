@@ -1,4 +1,5 @@
 import re
+import h5py
 
 import numpy as np
 from util.config_data import BatteryDatasheet
@@ -15,7 +16,7 @@ def check_crit_current(
     curr_crit_max,
 ):
     # Calculate the SoC values
-    soc = (soc_start  - (np.cumsum(current, axis=1)* dt/3600/capa))
+    soc = soc_start - (np.cumsum(current, axis=1) * dt / 3600 / capa)
     # Find indices where SoC is outside the critical range
     crit_soc_mask = (soc < soc_crit_min) | (soc > soc_crit_max)
     # Find corresponding current values
@@ -64,7 +65,7 @@ def check_soc(
     capa_soc_max,
     capa_soc_min,
 ):
-    charge = (soc_start  - (np.cumsum(current, axis=1)* dt/3600/capa))
+    charge = soc_start - (np.cumsum(current, axis=1) * dt / 3600 / capa)
     # convert to [Ah]
     if (charge > capa_soc_max).any() or (charge < capa_soc_min).any():
         raise ValueError(
@@ -91,7 +92,9 @@ def check_bounds_temp(temp, max_limit, min_limit):
     print(f"Passed: Temperature bounds min={temp.min()}, max={temp.max()}")
 
 
-def verify_dataset_limits(dataset):
+def verify_dataset_limits(data_file, dataset):
+    with h5py.File(data_file, "w") as file:
+        dataset = file[dataset]  # Access the specified dataset
     # Currently only inputs get checked
     limits = BatteryDatasheet()
     inp_params = [
