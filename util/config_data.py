@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Dict
 
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -16,7 +17,7 @@ class BatteryDatasheet:
             "chg": -3.395,  # [A] continous
             "dchg": 7.275,  # [A] continous
             "short_chg": -3.395,  # [A/s]
-            "short_dchg": 80/4.2,  # 19.04 [A/s]
+            "short_dchg": 80 / 4.2,  # 19.04 [A/s]
             "short_time": 10,  # [s]
             # Parameter for current profile generation
             "soc_crit_chg": -1.455,
@@ -25,14 +26,14 @@ class BatteryDatasheet:
     )
     U_terminal: Dict[str, float] = field(
         default_factory=lambda: {
-            "max": 4.2,  # [V]
+            "max": 4.25,  # [V]
             "min": 2.5,  # [V]
         }
     )
     T_surf: Dict[str, float] = field(
         default_factory=lambda: {
-            "max": 273.15 + 60,  # [K]
-            "min": 273.15 + 25,  # [K]
+            "max": 60,  # [C]
+            "min": -25,  # [C]
         }
     )
     capa: Dict[str, float] = field(
@@ -63,42 +64,104 @@ class BatteryDatasheet:
         self.seq_len = self.cycle_time // self.dt
 
 
+def rescale_data(file_path, dataset_name):
+    """Rescale data back to the original values using stored min and max values."""
+
+    with h5py.File(file_path, "r+") as file:
+        scaled_dataset = file[dataset_name]
+        feature_names = scaled_dataset.attrs["dim_2"].tolist()
+        min_values = scaled_dataset.attrs["min_values"]
+        max_values = scaled_dataset.attrs["max_values"]
+
+        # Create a new dataset for rescaled data
+        rescaled_dataset = file.create_dataset(
+            dataset_name + "_rescaled", scaled_dataset.shape, dtype=scaled_dataset.dtype
+        )
+
+        # Rescale dataset slice by slice
+        for slice_idx in range(scaled_dataset.shape[0]):
+            scaled_slice = scaled_dataset[slice_idx, :, :]
+            rescaled_slice = np.empty_like(scaled_slice)
+            for i, _ in enumerate(feature_names):
+                rescaled_slice[:, i] = (
+                    scaled_slice[:, i] * (max_values[i] - min_values[i])
+                ) + min_values[i]
+            rescaled_dataset[slice_idx, :, :] = rescaled_slice
+
+        # Copy attributes
+        for attr in list(scaled_dataset.attrs.keys()):
+            rescaled_dataset.attrs[attr] = scaled_dataset.attrs[attr]
+
+    print("Data successfully rescaled and stored")
+
+
 def scale_data(file_path, dataset_name):
     """Scale data according to the specification if in or output is not
     specified in the dataclass the min and max gets determined from the
     actual data"""
+
     datasheet = BatteryDatasheet()
 
     with h5py.File(file_path, "r+") as file:
         dataset = file[dataset_name]
-        data = dataset[:]
+        feature_names = dataset.attrs["dim_2"].tolist()
 
-        feature_names = dataset.attrs["dim_2"]
         min_values = []
         max_values = []
+        scaled_dataset = file.create_dataset(
+            dataset_name + "_scaled", dataset.shape, dtype=dataset.dtype
+        )
+        verified_values = dataset.attrs["verified_values"]
 
-        # Scaling data based on feature_names from dataset.attrs
-        scaled_data = np.empty_like(data)
+        verified_values = verified_values.strip('"')
+        verified_values = eval(verified_values)
+
         for i, name in enumerate(feature_names):
-            clean_name = (
-                name.split(" ")[0][4:] if "Inp_" in name else name.split(" ")[0][4:]
-            )  # Removes 'Inp_'/'Out_' and unit
+            clean_name = name.split(" ")[0][4:]
+
             if clean_name in datasheet.__dict__:
-                min_val = datasheet.__dict__[clean_name]["min"]
-                max_val = datasheet.__dict__[clean_name]["max"]
+                if clean_name == "I_terminal":  # Specific handling for I_terminal
+                    min_val = datasheet.__dict__[clean_name]["short_chg"]
+                    max_val = datasheet.__dict__[clean_name]["short_dchg"]
+                else:
+                    min_val = datasheet.__dict__[clean_name]["min"]
+                    max_val = datasheet.__dict__[clean_name]["max"]
+                print(f"{clean_name} scaled based on datasheet")
+
+            elif any(clean_name in key for key in verified_values.keys()):
+                keys = [key for key in verified_values.keys() if clean_name in key]
+                min_val = verified_values[[key for key in keys if "min" in key][0]]
+                max_val = verified_values[[key for key in keys if "max" in key][0]]
+                print(f"{clean_name} scaled based on verified_values")
+
             else:
-                min_val = data[:, :, i].min()
-                max_val = data[:, :, i].max()
+                min_val, max_val = float("inf"), float("-inf")
+                for slice_idx in range(dataset.shape[0]):
+                    slice_data = dataset[slice_idx, :, i]
+                    min_val = min(min_val, slice_data.min())
+                    max_val = max(max_val, slice_data.max())
+                print(f"{clean_name} scaled based on dataset")
+
             min_values.append(min_val)
             max_values.append(max_val)
-            scaled_data[:, :, i] = (data[:, :, i] - min_val) / (max_val - min_val)
 
-        # Add the scaled dataset
-        scaled_dataset = file.create_dataset(dataset_name + "_scaled", data=scaled_data)
+        # Scale dataset slice by slice
+        for slice_idx in range(dataset.shape[0]):
+            data_slice = dataset[slice_idx, :, :]
+            scaled_slice = np.empty_like(data_slice)
+            for i, _ in enumerate(feature_names):
+                scaled_slice[:, i] = (data_slice[:, i] - min_values[i]) / (
+                    max_values[i] - min_values[i]
+                )
+            scaled_dataset[slice_idx, :, :] = scaled_slice
+
         scaled_dataset.attrs["min_values"] = min_values
         scaled_dataset.attrs["max_values"] = max_values
 
-    print("Data succesfully scaled and stored")
+        # Copy attributes
+        for attr in list(dataset.attrs.keys()):
+            scaled_dataset.attrs[attr] = dataset.attrs[attr]
+    print("Data successfully scaled and stored")
 
 
 def create_dummy_dataset():
@@ -114,8 +177,8 @@ def create_dummy_dataset():
 
     # Assign ranges for inputs based on datasheet
     data[:, :, 0] = np.random.uniform(
-        params.I_terminal["min"],
-        params.I_terminal["max"],
+        params.I_terminal["chg"],
+        params.I_terminal["dchg"],
         size=(n_series, seq_len),
     )  # Current [A]
     data[:, :, 1] = np.random.uniform(
@@ -152,13 +215,52 @@ def create_dummy_dataset():
         dataset.attrs["dim_2"] = (
             "Inp_I_terminal [A]",
             "Inp_U_terminal [V]",
-            "Inp_T_surface [K]",
+            "Inp_T_surface [C]",
             "Out_SoC [.]",
-            "Out_T_core [K]",
+            "Out_T_core [C]",
             "Out_OCV [V]",
         )
     print("Dummy data created succesfully")
 
 
+def check_scale_rescale(file_path, dataset_name):
+    with h5py.File(file_path, "r") as file:
+        data_raw = file[dataset_name]
+        data_scaled = file[dataset_name + "_scaled"]
+        data_resacled = file[dataset_name + "_scaled" + "_rescaled"]
+
+        plt.plot(data_raw[0, :, 0], label="raw")
+        plt.plot(data_resacled[0, :, 0], "--", label="rescaled")
+
+        v = data_raw[0, :, 0]
+        curr_min, curr_max = data_scaled.attrs["min_values"][0], data_scaled.attrs["max_values"][0]
+        val = (v - curr_min) / (curr_max - curr_min)
+        plt.plot(val, label="scaled val")
+
+        plt.plot(data_scaled[0, :, 0], "--", label="scaled")
+        plt.legend()
+        plt.show()
+
+
 if __name__ == "__main__":
+    import sys
+
+
+    sys.path.append(os.path.abspath(".."))
+    # os.chdir("..")
+    from tests.data_limits import verify_dataset_limits
+    from util.config_data import scale_data
+
     create_dummy_dataset()
+    verify_dataset_limits(
+        data_file="../data/train/dummy_battery_data.h5", dataset="random"
+    )
+    scale_data(file_path="../data/train/dummy_battery_data.h5", dataset_name="random")
+    rescale_data(
+        file_path="../data/train/dummy_battery_data.h5", dataset_name="random_scaled"
+    )
+
+    check_scale_rescale(
+        file_path="../data/train/dummy_battery_data.h5", dataset_name="random"
+    )
+    t = 5

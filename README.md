@@ -27,7 +27,7 @@ values where the neural network got current, terminal voltage and
 surface temperature. The predicted output was State-of-Charge,
 respectively.
 
-## Overview (working on it!)
+## Overview
 
 The [model](/model) directory has the designs I’m considering:
 
@@ -97,7 +97,7 @@ Getting additional information:
 - Open Circuit Voltage
 - Battery Internal Temperature
 
-## Results (…still brewing…)
+## Results (working on it)
 
 ## References
 

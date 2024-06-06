@@ -191,5 +191,5 @@ if __name__ == "__main__":
         initializer=initialize_globals,
         initargs=(current,),
     ) as executor:
-        results = list(executor.map(solve_simulation, range(291, current.shape[0])))
+        results = list(executor.map(solve_simulation, range(0, current.shape[0])))
 

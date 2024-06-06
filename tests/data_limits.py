@@ -1,6 +1,6 @@
 import re
-import h5py
 
+import h5py
 import numpy as np
 from util.config_data import BatteryDatasheet
 
@@ -93,65 +93,68 @@ def check_bounds_temp(temp, max_limit, min_limit):
 
 
 def verify_dataset_limits(data_file, dataset):
-    with h5py.File(data_file, "w") as file:
+    with h5py.File(data_file, "r+") as file:
         dataset = file[dataset]  # Access the specified dataset
-    # Currently only inputs get checked
-    limits = BatteryDatasheet()
-    inp_params = [
-        param.split(" ")[0][4:] if "Inp_" in param else None
-        for param in dataset.attrs["dim_2"]
-    ]
+        # Currently only inputs get checked
+        limits = BatteryDatasheet()
+        inp_params = [
+            param.split(" ")[0][4:] if "Inp_" in param else None
+            for param in dataset.attrs["dim_2"]
+        ]
 
-    # Extracting dt from the seq_len attribute:
-    dt_match = re.search(r"dt\s*=\s*(\d+)s", dataset.attrs["info"])
-    dt = int(dt_match.group(1)) if dt_match else 1  # default to 1 if not found
-    verified_values = {}
-    for index, param in enumerate(inp_params):
-        if param is None:
-            continue
-        data = dataset[:, :, index]
-        if param == "I_terminal":
-            max_limit = limits.I_terminal["chg"]
-            min_limit = limits.I_terminal["dchg"]
-            check_bounds_current(data, min_limit, max_limit)
-            verified_values["I_terminal_max"] = data.max()
-            verified_values["I_terminal_min"] = data.min()
-            # Short term checks
-            short_max_limit = limits.I_terminal["short_chg"]
-            short_min_limit = limits.I_terminal["short_dchg"]
-            short_time = limits.I_terminal["short_time"]
-            check_short_current(data, short_min_limit, short_max_limit, short_time, dt)
-            check_crit_current(
-                data,
-                dt,
-                limits.capa["max"],
-                short_min_limit,
-                limits.capa["soc_crit_min"],
-                limits.capa["soc_crit_max"],
-                limits.I_terminal["soc_crit_chg"],
-                limits.I_terminal["soc_crit_dchg"],
-            )
-            # Capacity check
-            charge = check_soc(
-                data,
-                dt,
-                limits.capa["max"],
-                limits.capa["soc_min"],
-                limits.capa["soc_max"],
-                limits.capa["soc_min"],
-            )
-            verified_values["capa_max"] = charge.max()
-            verified_values["capa_min"] = charge.min()
-        elif param == "U_terminal":
-            max_limit = limits.U_terminal["max"]
-            min_limit = limits.U_terminal["min"]
-            check_bounds_voltage(data, max_limit, min_limit)
-            verified_values["U_terminal_max"] = data.max()
-            verified_values["U_terminal_min"] = data.min()
-        elif param == "T_surface":
-            max_limit = limits.T_surf["max"]
-            min_limit = limits.T_surf["min"]
-            check_bounds_temp(data, max_limit, min_limit)
-            verified_values["T_surface_max"] = data.max()
-            verified_values["T_surface_min"] = data.min()
-    dataset.attrs["verified_values"] = str(verified_values)
+        # Extracting dt from the seq_len attribute:
+        dt_match = re.search(r"dt\s*=\s*(\d+)s", dataset.attrs["info"])
+        dt = int(dt_match.group(1)) if dt_match else 1  # default to 1 if not found
+        verified_values = {}
+        for index, param in enumerate(inp_params):
+            if param is None:
+                continue
+            data = dataset[:, :, index]
+            if param == "I_terminal":
+                max_limit = limits.I_terminal["short_chg"]
+                min_limit = limits.I_terminal["short_dchg"]
+                check_bounds_current(data, min_limit, max_limit)
+                verified_values["I_terminal_max"] = data.max()
+                verified_values["I_terminal_min"] = data.min()
+                # Short term checks
+                short_max_limit = limits.I_terminal["short_chg"]
+                short_min_limit = limits.I_terminal["short_dchg"]
+                short_time = limits.I_terminal["short_time"]
+                check_short_current(
+                    data, short_min_limit, short_max_limit, short_time, dt
+                )
+                soc_start = 1
+                check_crit_current(
+                    data,
+                    dt,
+                    limits.capa["max"],
+                    soc_start,
+                    limits.capa["soc_crit_min"],
+                    limits.capa["soc_crit_max"],
+                    limits.I_terminal["soc_crit_chg"],
+                    limits.I_terminal["soc_crit_dchg"],
+                )
+                # Capacity check
+                charge = check_soc(
+                    data,
+                    dt,
+                    limits.capa["max"],
+                    soc_start,
+                    max(limits.capa["soc_max"], soc_start)*1.001,
+                    limits.capa["soc_min"]*0.999,
+                )
+                verified_values["SoC_max"] = charge.max()
+                verified_values["SoC_min"] = charge.min()
+            elif param == "U_terminal":
+                max_limit = limits.U_terminal["max"]
+                min_limit = limits.U_terminal["min"]
+                check_bounds_voltage(data, max_limit, min_limit)
+                verified_values["U_terminal_max"] = data.max()
+                verified_values["U_terminal_min"] = data.min()
+            elif param == "T_surface":
+                max_limit = limits.T_surf["max"]
+                min_limit = limits.T_surf["min"]
+                check_bounds_temp(data, max_limit, min_limit)
+                verified_values["T_surface_max"] = data.max()
+                verified_values["T_surface_min"] = data.min()
+        dataset.attrs["verified_values"] = str(verified_values)
