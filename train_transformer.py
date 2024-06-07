@@ -12,6 +12,7 @@ import time
 from contextlib import nullcontext
 
 import torch
+import torch.nn.functional as F
 import wandb
 
 from model.transformer import ModelArgs, Transformer
@@ -23,7 +24,7 @@ from util.prepare_data import BatteryData
 # default config values designed to train a Transformer with 124M params
 # I/O
 out_dir = "ckpt/transformer/"
-eval_interval = 2000
+eval_interval = 20
 log_interval = 1
 eval_iters = 200
 init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
@@ -35,16 +36,18 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
 gradient_accumulation_steps = 1 * 4  # used to simulate larger batch sizes
-batch_size = 32  # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 4  # if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 256
 # model
-n_layer = 8
-n_heads = 4
-dim_model = 512
+n_layer = 6
+n_heads = 2
+dim_model = 256
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
+# step =  batch_size * seq_len * gradient_accumulation_steps # 32_768 datapoints per iteration
+# iterations = 3_000*360_000 / step # iterations for one epoch
 max_iters = 600000  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
@@ -121,7 +124,15 @@ best_val_loss = 1e9
 # scale_data(file_path=data_file, dataset_name=dataset)
 train_data = BatteryData(data_file, dataset, batch_size, seq_len, device)
 # model init
-model_args = ModelArgs( n_layer=n_layer, n_heads=n_heads, dim_model=dim_model, seq_len=seq_len, max_seq_len=seq_len, bias=bias, dropout=dropout)  # start with model_args from command line
+model_args = ModelArgs(
+    n_layer=n_layer,
+    n_heads=n_heads,
+    dim_model=dim_model,
+    seq_len=seq_len,
+    max_seq_len=seq_len,
+    bias=bias,
+    dropout=dropout,
+)  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -173,13 +184,28 @@ if compile:
 def estimate_loss():
     out = {}
     model.eval()
-    for split in ["train", "val"]:
+    for split in ["train", "val", "pred"]:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             X, Y = train_data.get_batch(split)
-            with ctx:
-                _, loss = model(X, Y)
-            losses[k] = loss.item()
+            if split == "pred":
+                y_hat = []
+                with ctx:
+                    input = X[:, :seq_len]
+                    for i in range(seq_len):
+                        y, _ = model(input)
+                        y_hat.append(y)
+                        input = torch.roll(input, -1, 1)
+                        input[:, -1, 0] = X[:, seq_len + i, 0]
+                        input[:, -1, 1:3] = y[:, -1, :2]
+                    y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
+                    losses[k] = F.mse_loss(Y[:, seq_len:], y_hat)
+                if k == 1:
+                    break
+            else:
+                with ctx:
+                    _, loss = model(X, Y)
+                losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
     return out
@@ -219,8 +245,9 @@ while True:
     if iter_num % eval_interval == 0:
         losses = estimate_loss()
         print(
-            f"step {iter_num}: train loss {losses['train']:.4f}, "
-            f"val loss {losses['val']:.4f}"
+            f"step {iter_num}: train loss {losses['train']:.1e}, "
+            f"val loss {losses['val']:.1e}"
+            f"val pred loss {losses['pred']:.1e}"
         )
         if wandb_log:
             # TODO: save file to out_dir, dont override existing files! sub dir or file name
@@ -229,6 +256,7 @@ while True:
                     "iter": iter_num,
                     "train/loss": losses["train"],
                     "val/loss": losses["val"],
+                    "pred/loss": losses["pred"],
                     "lr": lr,
                     "mfu": running_mfu * 100,  # convert to percentage
                 }
@@ -242,6 +270,7 @@ while True:
                     "model_args": model_args,
                     "iter_num": iter_num,
                     "best_val_loss": best_val_loss,
+                    "pred_loss": losses["pred"],
                     "config": config,
                 }
                 print(f"saving checkpoint to {out_dir}")
@@ -249,7 +278,8 @@ while True:
                 torch.save(
                     checkpoint,
                     os.path.join(
-                        out_dir, f"{checkpoint['best_val_loss']:.1e}_val_loss.pt"
+                        out_dir,
+                        f"{checkpoint['best_val_loss']:.1e}_val_loss_{checkpoint['pred_loss']:.1e}_pred_loss.pt",
                     ),
                 )
 
@@ -292,7 +322,7 @@ while True:
             )
             running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
         print(
-            f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, "
+            f"iter {iter_num}: train loss {lossf:.1e}, time {dt*1000:.2f}ms, "
             f"mfu {running_mfu*100:.2f}%"
         )
     iter_num += 1
@@ -303,5 +333,5 @@ while True:
         break
 
 # TODO: make init script function!
-if __name__ == "__main__":
-    pass
+# if __name__ == "__main__":
+#     pass

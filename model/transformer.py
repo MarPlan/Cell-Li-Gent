@@ -21,8 +21,8 @@ class ModelArgs:
     pe_type: str = "RoPE"
     norm_type: str = "RMSNorm"
     dim_model: int = 128
-    dim_out: int = 6
-    dim_inp: int = 6
+    dim_out: int = 5
+    dim_inp: int = 3
     n_heads: int = 16
     seq_len: int = 256
     max_seq_len: int = 256

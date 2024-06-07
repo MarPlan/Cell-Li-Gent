@@ -13,9 +13,9 @@ import numpy as np
 import torch
 
 
-class BatteryData():
+class BatteryData:
     def __init__(self, file_path, dataset, batch_size, seq_len, device):
-        self.file =h5py.File(file_path, "r")
+        self.file = h5py.File(file_path, "r")
         self.file_path = file_path
         self.dataset = dataset
 
@@ -23,11 +23,12 @@ class BatteryData():
         self.sub_seq_len = seq_len
         self.device = device
 
-        self.n_series =self.file[dataset].shape[0]
+        self.n_series = self.file[dataset].shape[0]
         self.total_seq_len = self.file[dataset].shape[1]
 
     def get_batch(self, split):
         """Prepare a batch of data tensors for the given 'split'."""
+        pred_horizon = 1  # factor for seq_len prediction horizon
         if split == "train":
             # We dont sample here because some data generation might have patterns that
             # repeat over a few consecutive time series
@@ -41,38 +42,51 @@ class BatteryData():
         if split == "val":
             # Only 20 percent of training data for validation
             seq_indices = np.random.randint(
-                np.ceil(self.n_series * 0.8) - 1 , self.n_series, self.batch_size
+                np.ceil(self.n_series * 0.8) - 1, self.n_series, self.batch_size
             )
             start_indices = np.random.randint(
-                0, self.total_seq_len - self.sub_seq_len , self.batch_size
+                0, self.total_seq_len - self.sub_seq_len, self.batch_size
             )
-        if split in ["test", "predict"]:
-            seq_indices = np.arange(self.batch_size)
-            start_indices = np.zeros(self.batch_size)
-        # else:
-        #     # Handle non-training/validation cases or return appropriate messaging/error
-        #     print(f"No data handling defined for split: {split}")
-        #     return None, None
+        if split == "pred":
+            # Using validation data
+            pred_horizon = 2  # factor for seq_len prediction horizon
+            seq_indices = np.random.randint(
+                np.ceil(self.n_series * 0.8) - 1, self.n_series, self.batch_size
+            )
+            start_indices = np.random.randint(
+                0, self.total_seq_len - pred_horizon * self.sub_seq_len, self.batch_size
+            )
 
         with h5py.File(self.file_path, "r") as file:
             data = file[self.dataset]  # Access the specified dataset
 
             # Fetch the subsequences for `x` using list comprehension
+            # Inputs [,,:3] >> I_terminal, U_terminal, T_surface
             x = torch.stack(
                 [
                     torch.from_numpy(
-                        data[seq_idx, start_idx : start_idx + self.sub_seq_len, :]
+                        data[
+                            seq_idx,
+                            start_idx : start_idx + pred_horizon * self.sub_seq_len,
+                            :3,
+                        ]
                     )
                     for seq_idx, start_idx in zip(seq_indices, start_indices)
                 ]
             ).to(torch.float32)
 
             # Fetch the subsequences for `y` (targets) using list comprehension
+            # Outputs [,,1:] >> U_terminal, T_surface, SoC, T_core, OCV
+            # Not I_terminal because random, maybe interesting for operating prediction
             y = torch.stack(
                 [
                     torch.from_numpy(
                         data[
-                            seq_idx, start_idx + 1 : start_idx + 1 + self.sub_seq_len, :
+                            seq_idx,
+                            start_idx + 1 : start_idx
+                            + 1
+                            + pred_horizon * self.sub_seq_len,
+                            1:,
                         ]
                     )
                     for seq_idx, start_idx in zip(seq_indices, start_indices)
