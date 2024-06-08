@@ -20,15 +20,15 @@ import torch.nn.functional as F
 class ModelArgs:
     pe_type: str = "RoPE"
     norm_type: str = "RMSNorm"
-    dim_model: int = 128
+    dim_model: int = 256
     dim_out: int = 5
     dim_inp: int = 3
-    n_heads: int = 16
+    n_heads: int = 4
     seq_len: int = 256
     max_seq_len: int = 256
     rope_theta: float = 10000.0
     dropout: float = 1.0
-    n_layer: int = 10
+    n_layer: int = 6
     bias: bool = False  # do we use bias inside LayerNorm and Linear layers?
     act_type: str = "SwiGLU"
 

@@ -11,6 +11,7 @@ import os
 import time
 from contextlib import nullcontext
 
+import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 import wandb
@@ -24,28 +25,28 @@ from util.prepare_data import BatteryData
 # default config values designed to train a Transformer with 124M params
 # I/O
 out_dir = "ckpt/transformer/"
-eval_interval = 20
+eval_interval = 200
 log_interval = 1
 eval_iters = 200
 init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
-wandb_log = False  # disabled by default
+wandb_log = True  # disabled by default
 wandb_project = "Cell-Li-Gent"
 wandb_run_name = "transformer"  # 'run' + str(time.time())
 # data
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
-gradient_accumulation_steps = 1 * 4  # used to simulate larger batch sizes
-batch_size = 4  # if gradient_accumulation_steps > 1, this is the micro-batch size
-seq_len = 256
+gradient_accumulation_steps = 8  # used to simulate larger batch sizes
+batch_size = 32  # if gradient_accumulation_steps > 1, this is the micro-batch size
+seq_len = 1024
 # model
 n_layer = 6
-n_heads = 2
+n_heads = 4
 dim_model = 256
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 6e-4  # max learning rate
+learning_rate = 1e-3  # max learning rate
 # step =  batch_size * seq_len * gradient_accumulation_steps # 32_768 datapoints per iteration
 # iterations = 3_000*360_000 / step # iterations for one epoch
 max_iters = 600000  # total number of training iterations
@@ -66,7 +67,7 @@ dtype = (
     if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     else "float16"
 )
-# TODO: use PyTorch 2.0 to compile the model to be faster CRASHING
+#use PyTorch 2.0 to compile the model to be faster
 compile = False
 flops_promised = 312e12  # A100 GPU bfloat16 peak flops is 312 TFLOPS
 # -----------------------------------------------------------------------------
@@ -179,16 +180,43 @@ if compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 
+def check_in_out(x, y, y_hat, file_path=data_file, dataset_name=dataset):
+    import h5py
+
+    with h5py.File(file_path, "r") as file:
+        data_scaled = file[dataset_name]
+        mins, maxs = data_scaled.attrs["min_values"], data_scaled.attrs["max_values"]
+    fig = plt.figure()
+    ax = fig.subplots(2, 1, sharex=True)
+
+    batch_nr = 0
+    for i in range(x.shape[-1]):
+        x[:, :, i] = x[:, :, i] * (maxs[i] - mins[i]) + mins[i]
+        ax[0].plot(x[batch_nr, :, i], label="X")
+    ax[0].legend()
+
+    for i in range(y.shape[-1]):
+        y[:, :, i] = y[:, :, i] * (maxs[i + 1] - mins[i + 1]) + mins[i + 1]
+        y_hat[:, :, i] = y_hat[:, :, i] * (maxs[i + 1] - mins[i + 1]) + mins[i + 1]
+
+        ax[1].plot(y[batch_nr, :, i], label="Y")
+        ax[1].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
+    ax[1].legend()
+    plt.tight_layout()
+    plt.show()
+
+
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
 def estimate_loss():
     out = {}
     model.eval()
-    for split in ["train", "val", "pred"]:
+    for split in ["train", "val"]: #, "pred"]:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             X, Y = train_data.get_batch(split)
             if split == "pred":
+                print("pred mode")
                 y_hat = []
                 with ctx:
                     input = X[:, :seq_len]
@@ -200,6 +228,7 @@ def estimate_loss():
                         input[:, -1, 1:3] = y[:, -1, :2]
                     y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                     losses[k] = F.mse_loss(Y[:, seq_len:], y_hat)
+                    # check_in_out(X[:,seq_len:].cpu(), Y[:,seq_len:].cpu(), y_hat.cpu())
                 if k == 1:
                     break
             else:
@@ -226,9 +255,7 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 
-# TODO: chrashed
-# wandb.init(project=wandb_project, name=wandb_run_name, config=config)
-
+wandb.init(dir=out_dir, project=wandb_project, name=wandb_run_name, config=config)
 
 # training loop
 X, Y = train_data.get_batch("train")  # fetch the very first batch
@@ -247,16 +274,15 @@ while True:
         print(
             f"step {iter_num}: train loss {losses['train']:.1e}, "
             f"val loss {losses['val']:.1e}"
-            f"val pred loss {losses['pred']:.1e}"
+            # f"val pred loss {losses['pred']:.1e}"
         )
         if wandb_log:
-            # TODO: save file to out_dir, dont override existing files! sub dir or file name
             wandb.log(
                 {
                     "iter": iter_num,
                     "train/loss": losses["train"],
                     "val/loss": losses["val"],
-                    "pred/loss": losses["pred"],
+                    # "pred/loss": losses["pred"],
                     "lr": lr,
                     "mfu": running_mfu * 100,  # convert to percentage
                 }
@@ -270,7 +296,7 @@ while True:
                     "model_args": model_args,
                     "iter_num": iter_num,
                     "best_val_loss": best_val_loss,
-                    "pred_loss": losses["pred"],
+                    # "pred_loss": losses["pred"],
                     "config": config,
                 }
                 print(f"saving checkpoint to {out_dir}")
@@ -279,7 +305,8 @@ while True:
                     checkpoint,
                     os.path.join(
                         out_dir,
-                        f"{checkpoint['best_val_loss']:.1e}_val_loss_{checkpoint['pred_loss']:.1e}_pred_loss.pt",
+                        # f"{checkpoint['best_val_loss']:.1e}_val_loss_{checkpoint['pred_loss']:.1e}_pred_loss.pt",
+                        f"{checkpoint['best_val_loss']:.1e}_val_loss.pt",
                     ),
                 )
 
@@ -331,7 +358,3 @@ while True:
     # termination conditions
     if iter_num > max_iters:
         break
-
-# TODO: make init script function!
-# if __name__ == "__main__":
-#     pass

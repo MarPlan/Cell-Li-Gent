@@ -49,7 +49,7 @@ class BatteryData:
             )
         if split == "pred":
             # Using validation data
-            pred_horizon = 2  # factor for seq_len prediction horizon
+            pred_horizon = 12  # factor for seq_len prediction horizon
             seq_indices = np.random.randint(
                 np.ceil(self.n_series * 0.8) - 1, self.n_series, self.batch_size
             )
