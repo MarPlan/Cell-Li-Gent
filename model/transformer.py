@@ -22,7 +22,7 @@ class ModelArgs:
     norm_type: str = "RMSNorm"
     dim_model: int = 256
     dim_out: int = 5
-    dim_inp: int = 3
+    dim_inp: int = 6
     n_heads: int = 4
     seq_len: int = 256
     max_seq_len: int = 256
@@ -113,7 +113,9 @@ class CausalSelfAttention(nn.Module):
         assert config.dim_model % config.n_heads == 0
         self.pe_type = config.pe_type
         if config.pe_type == "RoPE":
-            freqs_cos, freqs_sin = precompute_freqs_cis(config.dim_model // config.n_heads, config.max_seq_len)
+            freqs_cos, freqs_sin = precompute_freqs_cis(
+                config.dim_model // config.n_heads, config.max_seq_len
+            )
             self.register_buffer("freqs_cos", freqs_cos, persistent=False)
             self.register_buffer("freqs_sin", freqs_sin, persistent=False)
             # self.freqs_cis = precompute_freqs_cis(
@@ -151,10 +153,10 @@ class CausalSelfAttention(nn.Module):
         # (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         # efficient attention using Flash Attention CUDA kernels
         if self.pe_type == "RoPE":
-            q, k = self.rope(q,k,self.freqs_cos, self.freqs_sin)
+            q, k = self.rope(q, k, self.freqs_cos, self.freqs_sin)
         # make heads into a batch dimension
         # (bs, n_local_heads, seqlen, head_dim)
-        q = q.transpose(1, 2) 
+        q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
         y = F.scaled_dot_product_attention(
@@ -165,7 +167,9 @@ class CausalSelfAttention(nn.Module):
             dropout_p=self.dropout if self.training else 0,
             is_causal=True,
         )
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        y = (
+            y.transpose(1, 2).contiguous().view(B, T, C)
+        )  # re-assemble all head outputs side by side
 
         # output projection
         y = self.resid_dropout(self.c_proj(y))
@@ -177,7 +181,9 @@ class MLP(nn.Module):
         super().__init__()
         self.act_type = config.act_type
         if config.act_type == "SwiGLU":
-            self.c_fc_2 = nn.Linear(config.dim_model, 4 * config.dim_model, bias=config.bias)
+            self.c_fc_2 = nn.Linear(
+                config.dim_model, 4 * config.dim_model, bias=config.bias
+            )
         self.c_fc = nn.Linear(config.dim_model, 4 * config.dim_model, bias=config.bias)
         self.c_proj = nn.Linear(
             4 * config.dim_model, config.dim_model, bias=config.bias
@@ -185,7 +191,7 @@ class MLP(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        if self.act_type=="SwiGLU":
+        if self.act_type == "SwiGLU":
             return self.dropout(self.c_proj(F.silu(self.c_fc(x)) * self.c_fc_2(x)))
         else:
             x = self.c_fc(x)

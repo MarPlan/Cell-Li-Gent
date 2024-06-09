@@ -25,7 +25,7 @@ from util.prepare_data import BatteryData
 # default config values designed to train a Transformer with 124M params
 # I/O
 out_dir = "ckpt/transformer/"
-eval_interval = 200
+eval_interval = 50
 log_interval = 1
 eval_iters = 200
 init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'

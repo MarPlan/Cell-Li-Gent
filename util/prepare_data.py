@@ -49,7 +49,7 @@ class BatteryData:
             )
         if split == "pred":
             # Using validation data
-            pred_horizon = 12  # factor for seq_len prediction horizon
+            pred_horizon = 6  # factor for seq_len prediction horizon
             seq_indices = np.random.randint(
                 np.ceil(self.n_series * 0.8) - 1, self.n_series, self.batch_size
             )
@@ -62,13 +62,14 @@ class BatteryData:
 
             # Fetch the subsequences for `x` using list comprehension
             # Inputs [,,:3] >> I_terminal, U_terminal, T_surface
+            # Use all parameters as inputs, at least for pre-training
             x = torch.stack(
                 [
                     torch.from_numpy(
                         data[
                             seq_idx,
                             start_idx : start_idx + pred_horizon * self.sub_seq_len,
-                            :3,
+                            # :3,
                         ]
                     )
                     for seq_idx, start_idx in zip(seq_indices, start_indices)

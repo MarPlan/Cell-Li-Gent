@@ -47,15 +47,19 @@ def estimate_loss():
     y_hat_pseudo = []
     with ctx:
         input = X[:, :seq_len]
-        for i in range(seq_len * 11):
+        input_pseudo = X[:, :seq_len]
+        for i in range(seq_len * 5):
             y, _ = model(input)
             y_hat.append(y.cpu().numpy())
             input = torch.roll(input, -1, 1)
             input[:, -1, 0] = X[:, seq_len + i, 0]
-            input[:, -1, 1:3] = y[:, -1, :2]
+            input[:, -1, 1:] = y[:, -1]
 
-            y, _ = model(X[:, i : seq_len + i])
+            y, _ = model(input_pseudo)
             y_hat_pseudo.append(y.cpu().numpy())
+            input_pseudo = torch.roll(input_pseudo, -1, 1)
+            input_pseudo[:, -1, :3] = X[:, seq_len + i, :3]
+            input_pseudo[:, -1, 3:] = y[:, -1, 2:]
 
         y_hat = np.concatenate(y_hat, axis=1)
         y_hat_pseudo = np.concatenate(y_hat_pseudo, axis=1)
@@ -73,7 +77,7 @@ def estimate_loss():
 
 
 if __name__ == "__main__":
-    ckpt_path = "ckpt/transformer/v_9/8.9e-04_val_loss.pt"
+    ckpt_path = "ckpt/transformer/v_10/2.6e-04_val_loss.pt"
     data_file = os.path.abspath("data/train/battery_data.h5")
     dataset = "spme_training_scaled"
     batch_size = 1  # if gradient_accumulation_steps > 1, this is the micro-batch size
