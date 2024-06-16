@@ -6,6 +6,7 @@ https://github.com/karpathy/nanoGPT/blob/master/train.py
 Minor adjustments for a different model, data and single GPU only
 """
 
+import argparse
 import math
 import os
 import time
@@ -21,43 +22,107 @@ from tests.data_limits import verify_dataset_limits
 from util.config_data import scale_data
 from util.prepare_data import BatteryData
 
+parser = argparse.ArgumentParser()
+# file system input / output
+parser.add_argument(
+    "--data_file",
+    type=str,
+)
+parser.add_argument(
+    "--out_dir",
+    type=str,
+)
+parser.add_argument(
+    "--dataset",
+    type=str,
+)
+
+parser.add_argument(
+    "--batch_size",
+    type=int,
+)
+parser.add_argument(
+    "--seq_len",
+    type=int,
+)
+parser.add_argument(
+    "--n_layer",
+    type=int,
+)
+parser.add_argument(
+    "--n_heads",
+    type=int,
+)
+parser.add_argument(
+    "--dim_model",
+    type=int,
+)
+parser.add_argument("--sequence_length", type=int)
+parser.add_argument(
+    "--gradient_accumulation_steps",
+    type=int,
+)
+
+parser.add_argument(
+    "--max_iters",
+    type=int,
+)
+
+# optimization
+parser.add_argument("--learning_rate", type=float)
+parser.add_argument("--warmup_iters", type=int)
+parser.add_argument("--weight_decay", type=float)
+parser.add_argument("--grad_clip", type=float)
+# evaluation
+parser.add_argument("--print_gpu", type=int)
+parser.add_argument("--wandb_log", type=int)
+parser.add_argument("--eval_interval", type=str)
+# # memory management
+parser.add_argument("--device", type=str)
+parser.add_argument("--compile", type=int)
+parser.add_argument("--dtype", type=str)
+parser.add_argument("--wandb_api_key", type=str)
+
+
 # -----------------------------------------------------------------------------
 # default config values designed to train a Transformer with 124M params
 # I/O
+wandb_api_key = ""
+print_gpu = False
 out_dir = "ckpt/transformer/"
-eval_interval = 50
-log_interval = 1
+eval_interval = 250
+log_interval = 10
 eval_iters = 200
 init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
-wandb_log = True  # disabled by default
+wandb_log = 1  # disabled by default
 wandb_project = "Cell-Li-Gent"
 wandb_run_name = "transformer"  # 'run' + str(time.time())
 # data
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
-gradient_accumulation_steps = 8  # used to simulate larger batch sizes
+gradient_accumulation_steps = 16  # used to simulate larger batch sizes
 batch_size = 32  # if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 1024
 # model
-n_layer = 6
-n_heads = 4
-dim_model = 256
+n_layer = 12
+n_heads = 12
+dim_model = 768
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 1e-3  # max learning rate
 # step =  batch_size * seq_len * gradient_accumulation_steps # 32_768 datapoints per iteration
 # iterations = 3_000*360_000 / step # iterations for one epoch
-max_iters = 600000  # total number of training iterations
+max_iters = 20_000  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True  # whether to decay the learning rate
-warmup_iters = 2000  # how many steps to warm up for
-lr_decay_iters = 600000  # should be ~= max_iters per Chinchilla
+warmup_iters = 700  # how many steps to warm up for
+lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
 min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # system
 device = "mps"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps'
@@ -67,7 +132,7 @@ dtype = (
     if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     else "float16"
 )
-#use PyTorch 2.0 to compile the model to be faster
+# use PyTorch 2.0 to compile the model to be faster
 compile = False
 flops_promised = 312e12  # A100 GPU bfloat16 peak flops is 312 TFLOPS
 # -----------------------------------------------------------------------------
@@ -77,6 +142,12 @@ config_keys = [
     if not k.startswith("_") and isinstance(v, (int, float, bool, str))
 ]
 config = {k: globals()[k] for k in config_keys}  # will be useful for logging
+configs = parser.parse_args()
+parser_dict = vars(configs)
+for key in parser_dict:
+    if parser_dict[key] is not None:
+        config[key] = parser_dict[key]
+        globals()[key] = parser_dict[key]
 # -----------------------------------------------------------------------------
 # various inits, derived attributes, I/O setup
 # consider the input is of shape [batch_size, seq_len, number_inputs]
@@ -173,37 +244,10 @@ if init_from == "resume":
     optimizer.load_state_dict(checkpoint["optimizer"])
 checkpoint = None  # free up memory
 
-# TODO: CRASHES compile the model
 if compile:
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
-
-
-def check_in_out(x, y, y_hat, file_path=data_file, dataset_name=dataset):
-    import h5py
-
-    with h5py.File(file_path, "r") as file:
-        data_scaled = file[dataset_name]
-        mins, maxs = data_scaled.attrs["min_values"], data_scaled.attrs["max_values"]
-    fig = plt.figure()
-    ax = fig.subplots(2, 1, sharex=True)
-
-    batch_nr = 0
-    for i in range(x.shape[-1]):
-        x[:, :, i] = x[:, :, i] * (maxs[i] - mins[i]) + mins[i]
-        ax[0].plot(x[batch_nr, :, i], label="X")
-    ax[0].legend()
-
-    for i in range(y.shape[-1]):
-        y[:, :, i] = y[:, :, i] * (maxs[i + 1] - mins[i + 1]) + mins[i + 1]
-        y_hat[:, :, i] = y_hat[:, :, i] * (maxs[i + 1] - mins[i + 1]) + mins[i + 1]
-
-        ax[1].plot(y[batch_nr, :, i], label="Y")
-        ax[1].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
-    ax[1].legend()
-    plt.tight_layout()
-    plt.show()
 
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -211,7 +255,7 @@ def check_in_out(x, y, y_hat, file_path=data_file, dataset_name=dataset):
 def estimate_loss():
     out = {}
     model.eval()
-    for split in ["train", "val"]: #, "pred"]:
+    for split in ["train", "val"]:  # , "pred"]:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             X, Y = train_data.get_batch(split)
@@ -254,8 +298,21 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
 
+if wandb_log:
+    wandb.login(key=wandb_api_key)
+    wandb.init(dir=out_dir, project=wandb_project, name=wandb_run_name, config=config)
 
-wandb.init(dir=out_dir, project=wandb_project, name=wandb_run_name, config=config)
+
+def print_gpu_memory():
+    if torch.cuda.is_available():
+        memory_allocated = torch.cuda.memory_allocated()
+        memory_reserved = torch.cuda.memory_reserved()
+
+        print(f"Memory Allocated: {memory_allocated / (1024 ** 2):.2f} MB")
+        print(f"Memory Reserved: {memory_reserved / (1024 ** 2):.2f} MB")
+    else:
+        print("CUDA is not available.")
+
 
 # training loop
 X, Y = train_data.get_batch("train")  # fetch the very first batch
@@ -272,8 +329,8 @@ while True:
     if iter_num % eval_interval == 0:
         losses = estimate_loss()
         print(
-            f"step {iter_num}: train loss {losses['train']:.1e}, "
-            f"val loss {losses['val']:.1e}"
+            f"step {iter_num}: train loss {losses['train']:.3e}, "
+            f"val loss {losses['val']:.3e}"
             # f"val pred loss {losses['pred']:.1e}"
         )
         if wandb_log:
@@ -333,6 +390,8 @@ while True:
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
 
+    if print_gpu:
+        print_gpu_memory()
     # timing and logging
     t1 = time.time()
     dt = t1 - t0

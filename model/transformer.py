@@ -299,7 +299,7 @@ class Transformer(nn.Module):
         if y is not None:
             # if we are given some desired targets also calculate the loss
             out = self.output(x)
-            loss = F.mse_loss(out, y)
+            loss = F.mse_loss(out, y, reduction='sum')
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             out = self.output(
