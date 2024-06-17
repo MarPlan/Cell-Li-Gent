@@ -102,7 +102,7 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
 gradient_accumulation_steps = 2  # used to simulate larger batch sizes
-batch_size = 128 # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 128  # if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 2048
 # model
 n_layer = 12
@@ -111,19 +111,22 @@ dim_model = 768
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 1e-0 # max learning rate
+learning_rate = 5e1  # max learning rate
 # step =  batch_size * seq_len * gradient_accumulation_steps # 32_768 datapoints per iteration
 # iterations = 3_000*360_000 / step # iterations for one epoch
-max_iters = 2_000 * 3  # total number of training iterations
+# batches * time series resulting in iteration for one epoch
+max_iters = (
+    3_000 * 360_000 // (gradient_accumulation_steps * batch_size * seq_len)
+) * 40  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True  # whether to decay the learning rate
-warmup_iters = 100  # how many steps to warm up for
+warmup_iters = 200  # how many steps to warm up for
 lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
-min_lr = 6e-2  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+min_lr = 6e-1  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # system
 device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps'
 # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
@@ -298,6 +301,7 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
 
+
 if wandb_log:
     wandb.login(key=wandb_api_key)
     wandb.init(dir=out_dir, project=wandb_project, name=wandb_run_name, config=config)
@@ -329,21 +333,10 @@ while True:
     if iter_num % eval_interval == 0:
         losses = estimate_loss()
         print(
+            f"EVAL: "
             f"step {iter_num}: train loss {losses['train']:.3e}, "
             f"val loss {losses['val']:.3e}"
-            # f"val pred loss {losses['pred']:.1e}"
         )
-        if wandb_log:
-            wandb.log(
-                {
-                    "iter": iter_num,
-                    "train/loss": losses["train"],
-                    "val/loss": losses["val"],
-                    # "pred/loss": losses["pred"],
-                    "lr": lr,
-                    "mfu": running_mfu * 100,  # convert to percentage
-                }
-            )
         if losses["val"] < best_val_loss:
             best_val_loss = losses["val"]
             if iter_num > 0:
@@ -383,7 +376,7 @@ while True:
     # clip the gradient
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
     # step the optimizer and scaler if training in fp16
     scaler.step(optimizer)
     scaler.update()
@@ -409,8 +402,22 @@ while True:
             running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
         print(
             f"iter {iter_num}: train loss {lossf:.1e}, time {dt*1000:.2f}ms, "
+            f"norm {norm:.4f}, "
+            f"lr {lr:.4f}, "
             f"mfu {running_mfu*100:.2f}%"
         )
+        if wandb_log:
+            wandb.log(
+                {
+                    "iter": iter_num,
+                    "train/loss": losses["train"],
+                    "val/loss": losses["val"],
+                    "lr": lr,
+                    "mfu": running_mfu * 100,  # convert to percentage
+                    "norm": norm.item(),  # convert to percentage
+                }
+            )
+
     iter_num += 1
     local_iter_num += 1
 
