@@ -8,5 +8,6 @@ doc/curr_plot.npy
 data/
 ckpt/
 misc.py
+vastai.md
 
 !data/current/drive_cycle/

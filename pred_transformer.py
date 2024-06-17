@@ -74,14 +74,15 @@ def estimate_loss():
             file_path=data_file,
             dataset_name=dataset,
         )
+        tt=5
 
 
 if __name__ == "__main__":
-    ckpt_path = "ckpt/transformer/v_10/2.6e-04_val_loss.pt"
+    ckpt_path = "ckpt/transformer/v_3/1.3e+01_val_loss.pt"
     data_file = os.path.abspath("data/train/battery_data.h5")
     dataset = "spme_training_scaled"
     batch_size = 1  # if gradient_accumulation_steps > 1, this is the micro-batch size
-    device = "mps"
+    device = "cuda"
     model_args = ModelArgs()
     print(f"Resuming training from {ckpt_path}")
     # resume training from a checkpoint.

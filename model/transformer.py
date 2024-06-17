@@ -299,7 +299,9 @@ class Transformer(nn.Module):
         if y is not None:
             # if we are given some desired targets also calculate the loss
             out = self.output(x)
-            loss = F.mse_loss(out, y, reduction='sum')
+            # loss = F.mse_loss(out, y, reduction='sum')
+            # loss = (torch.log(torch.cosh(out - y))).sum()
+            loss = F.smooth_l1_loss(out, y, beta=0.005)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             out = self.output(

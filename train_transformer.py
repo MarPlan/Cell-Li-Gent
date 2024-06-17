@@ -91,7 +91,7 @@ wandb_api_key = ""
 print_gpu = False
 out_dir = "ckpt/transformer/"
 eval_interval = 250
-log_interval = 10
+log_interval = 1
 eval_iters = 200
 init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
@@ -101,9 +101,9 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 # data
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
-gradient_accumulation_steps = 16  # used to simulate larger batch sizes
-batch_size = 32  # if gradient_accumulation_steps > 1, this is the micro-batch size
-seq_len = 1024
+gradient_accumulation_steps = 2  # used to simulate larger batch sizes
+batch_size = 128 # if gradient_accumulation_steps > 1, this is the micro-batch size
+seq_len = 2048
 # model
 n_layer = 12
 n_heads = 12
@@ -111,21 +111,21 @@ dim_model = 768
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 1e-3  # max learning rate
+learning_rate = 1e-0 # max learning rate
 # step =  batch_size * seq_len * gradient_accumulation_steps # 32_768 datapoints per iteration
 # iterations = 3_000*360_000 / step # iterations for one epoch
-max_iters = 20_000  # total number of training iterations
+max_iters = 2_000 * 3  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True  # whether to decay the learning rate
-warmup_iters = 700  # how many steps to warm up for
+warmup_iters = 100  # how many steps to warm up for
 lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
-min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+min_lr = 6e-2  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # system
-device = "mps"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps'
+device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps'
 # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 dtype = (
     "bfloat16"
@@ -133,7 +133,7 @@ dtype = (
     else "float16"
 )
 # use PyTorch 2.0 to compile the model to be faster
-compile = False
+compile = True
 flops_promised = 312e12  # A100 GPU bfloat16 peak flops is 312 TFLOPS
 # -----------------------------------------------------------------------------
 config_keys = [
