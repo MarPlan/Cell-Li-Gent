@@ -299,9 +299,10 @@ class Transformer(nn.Module):
         if y is not None:
             # if we are given some desired targets also calculate the loss
             out = self.output(x)
-            # loss = F.mse_loss(out, y, reduction='sum')
-            # loss = (torch.log(torch.cosh(out - y))).sum()
-            loss = F.smooth_l1_loss(out, y, beta=0.005)
+            if self.training:
+                loss = F.mse_loss(out, y, reduction='mean')
+            else:
+                loss = F.mse_loss(out, y, reduction='mean')
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             out = self.output(
@@ -371,8 +372,7 @@ class Transformer(nn.Module):
             self.config.seq_len,
         )
         # a single token is not correct this way
-        D = self.config.dim_inp
-        flops_per_token = 6 * N * D + 12 * L * H * Q * T
+        flops_per_token = 6 * N  + 12 * L * H * Q * T
         flops_per_fwdbwd = flops_per_token * T
         flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
         # express our flops throughput as ratio of A100 bfloat16 peak flops

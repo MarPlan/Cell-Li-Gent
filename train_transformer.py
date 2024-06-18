@@ -101,8 +101,8 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 # data
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
-gradient_accumulation_steps = 2  # used to simulate larger batch sizes
-batch_size = 128  # if gradient_accumulation_steps > 1, this is the micro-batch size
+gradient_accumulation_steps = 4  # used to simulate larger batch sizes
+batch_size = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 2048
 # model
 n_layer = 12
@@ -111,7 +111,7 @@ dim_model = 768
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 5e1  # max learning rate
+learning_rate = 3e-2  # max learning rate
 # step =  batch_size * seq_len * gradient_accumulation_steps # 32_768 datapoints per iteration
 # iterations = 3_000*360_000 / step # iterations for one epoch
 # batches * time series resulting in iteration for one epoch
@@ -126,7 +126,7 @@ grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
 warmup_iters = 200  # how many steps to warm up for
 lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
-min_lr = 6e-1  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+min_lr = 3e-3  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # system
 device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps'
 # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
@@ -301,6 +301,37 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
 
+# # Example usage
+#     for it in range(1, 10001):  # Simulate 10000 iterations
+#         norm = 0.0001 * it  # Example norm values; in practice, calculate it
+#         lr = get_lr(it, norm)
+#         print(f"Iteration {it}: Learning Rate = {lr}")
+#     ```
+#
+# ### Explanation:
+#
+#     1. **Warmup Phase:**
+#        - During the first `warmup_iters` iterations, the learning rate increases linearly from 0 to the initial `learning_rate`.
+#
+#     2. **Steady Phase:**
+#        - After the warmup period, the learning rate remains constant for `interval_iters`.
+#
+#     3. **Norm Tracking:**
+#        - A norm history is tracked using a `deque` to store the past 1500 norm values. This deque automatically drops the oldest value when a new value is appended after reaching its maximum length.
+#
+#     4. **Interval Check:**
+#        - At the end of each epoch defined by `interval_iters` (i.e., `(it - warmup_iters) % interval_iters == 0`), the mean of the norm history is computed.
+#        - If the exponent of the logarithm base 10 of the mean norm is less than -1, the learning rate is adjusted according to `lr / ((10^exponent) - 1)`.
+#
+#     5. **Linear Update to New Learning Rate:**
+#        - If a new learning rate is computed, it linearly adjusts to the new value over `warmup_iters` iterations.
+#
+# ### Usage:
+#     - The `get_lr` function computes and updates the learning rate based on the iteration number and the current norm. It simulates an entire training process for 10000 iterations.
+#     - Replace `norm` with the actual value calculated during your training loop.
+#
+#     This code structure respects the described trapezoidal learning rate scheduler while dynamically adjusting learning rates based on the computed norm.
+
 
 if wandb_log:
     wandb.login(key=wandb_api_key)
@@ -410,8 +441,9 @@ while True:
             wandb.log(
                 {
                     "iter": iter_num,
-                    "train/loss": losses["train"],
-                    "val/loss": losses["val"],
+                    "loss_train": lossf,
+                    "val/loss_train": losses["train"],
+                    "val/loss_eval": losses["val"],
                     "lr": lr,
                     "mfu": running_mfu * 100,  # convert to percentage
                     "norm": norm.item(),  # convert to percentage

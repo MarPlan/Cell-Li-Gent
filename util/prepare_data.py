@@ -106,4 +106,4 @@ class BatteryData:
                 y.to(self.device),
             )  # Standard tensor transfer to the specified device
 
-        return x, y
+        return torch.round(x, decimals=4), torch.round(y, decimals=4)
