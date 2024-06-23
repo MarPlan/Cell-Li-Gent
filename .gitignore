@@ -9,5 +9,6 @@ data/
 ckpt/
 misc.py
 vastai.md
+doc/.ipynb_checkpoints/
 
 !data/current/drive_cycle/

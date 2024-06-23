@@ -87,7 +87,7 @@ class BatteryData:
                             start_idx + 1 : start_idx
                             + 1
                             + pred_horizon * self.sub_seq_len,
-                            1:,
+                            # 1:,
                         ]
                     )
                     for seq_idx, start_idx in zip(seq_indices, start_indices)
@@ -106,4 +106,4 @@ class BatteryData:
                 y.to(self.device),
             )  # Standard tensor transfer to the specified device
 
-        return torch.round(x, decimals=4), torch.round(y, decimals=4)
+        return torch.round(x[:,:,:-1], decimals=4), torch.round(y[:,:,[3,4]], decimals=4)

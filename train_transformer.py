@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 import wandb
+import numpy as np
 
 from model.transformer import ModelArgs, Transformer
 from tests.data_limits import verify_dataset_limits
@@ -102,7 +103,7 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
 gradient_accumulation_steps = 4  # used to simulate larger batch sizes
-batch_size = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 64 # if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 2048
 # model
 n_layer = 12
@@ -111,13 +112,13 @@ dim_model = 768
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 3e-2  # max learning rate
+learning_rate = 3e-2 # max learning rate
 # step =  batch_size * seq_len * gradient_accumulation_steps # 32_768 datapoints per iteration
 # iterations = 3_000*360_000 / step # iterations for one epoch
 # batches * time series resulting in iteration for one epoch
 max_iters = (
     3_000 * 360_000 // (gradient_accumulation_steps * batch_size * seq_len)
-) * 40  # total number of training iterations
+) * 20 # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -126,7 +127,7 @@ grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
 warmup_iters = 200  # how many steps to warm up for
 lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
-min_lr = 3e-3  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+min_lr = 3e-7  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # system
 device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps'
 # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
@@ -175,6 +176,7 @@ if os.path.exists(out_dir):
         version += 1
 
 torch.manual_seed(420)
+np.random.seed(420)
 torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 device_type = "cuda" if "cuda" in device else "cpu"  # for later use in torch.autocast
@@ -207,6 +209,7 @@ model_args = ModelArgs(
     max_seq_len=seq_len,
     bias=bias,
     dropout=dropout,
+    pe_type = "RoPE",
 )  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
@@ -288,49 +291,104 @@ def estimate_loss():
 
 
 # learning rate decay scheduler (cosine with warmup)
-def get_lr(it):
-    # 1) linear warmup for warmup_iters steps
-    if it < warmup_iters:
-        return learning_rate * it / warmup_iters
-    # 2) if it > lr_decay_iters, return min learning rate
-    if it > lr_decay_iters:
-        return min_lr
-    # 3) in between, use cosine decay down to min learning rate
-    decay_ratio = (it - warmup_iters) / (lr_decay_iters - warmup_iters)
-    assert 0 <= decay_ratio <= 1
-    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
-    return min_lr + coeff * (learning_rate - min_lr)
+# def get_lr(it):
+    ## 1) linear warmup for warmup_iters steps
+    #if it < warmup_iters:
+    #    return learning_rate * it / warmup_iters
+    ## 2) if it > lr_decay_iters, return min learning rate
+    #if it > lr_decay_iters:
+    #    return min_lr
+    ## 3) in between, use cosine decay down to min learning rate
+    #decay_ratio = (it - warmup_iters) / (lr_decay_iters - warmup_iters)
+    #assert 0 <= decay_ratio <= 1
+    #coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
+    #return min_lr + coeff * (learning_rate - min_lr)
 
-# # Example usage
-#     for it in range(1, 10001):  # Simulate 10000 iterations
-#         norm = 0.0001 * it  # Example norm values; in practice, calculate it
-#         lr = get_lr(it, norm)
-#         print(f"Iteration {it}: Learning Rate = {lr}")
-#     ```
-#
-# ### Explanation:
-#
-#     1. **Warmup Phase:**
-#        - During the first `warmup_iters` iterations, the learning rate increases linearly from 0 to the initial `learning_rate`.
-#
-#     2. **Steady Phase:**
-#        - After the warmup period, the learning rate remains constant for `interval_iters`.
-#
-#     3. **Norm Tracking:**
-#        - A norm history is tracked using a `deque` to store the past 1500 norm values. This deque automatically drops the oldest value when a new value is appended after reaching its maximum length.
-#
-#     4. **Interval Check:**
-#        - At the end of each epoch defined by `interval_iters` (i.e., `(it - warmup_iters) % interval_iters == 0`), the mean of the norm history is computed.
-#        - If the exponent of the logarithm base 10 of the mean norm is less than -1, the learning rate is adjusted according to `lr / ((10^exponent) - 1)`.
-#
-#     5. **Linear Update to New Learning Rate:**
-#        - If a new learning rate is computed, it linearly adjusts to the new value over `warmup_iters` iterations.
-#
-# ### Usage:
-#     - The `get_lr` function computes and updates the learning rate based on the iteration number and the current norm. It simulates an entire training process for 10000 iterations.
-#     - Replace `norm` with the actual value calculated during your training loop.
-#
-#     This code structure respects the described trapezoidal learning rate scheduler while dynamically adjusting learning rates based on the computed norm.
+# def get_lr(it, norm):
+#     global current_lr, new_lr, change_iters, steps, lr_step
+#     norm_history.append(norm)
+# 
+#     # 1) Linear warmup for warmup_iters steps
+#     if it < warmup_iters:
+#         current_lr = learning_rate * it / warmup_iters
+#         steps = interval_iters
+#         return current_lr
+# 
+#     # 2) Maintain learning rate for interval_iters
+#     if steps < 1:
+#         steps = interval_iters
+#         averaged_norm = sum(norm_history) / len(norm_history)
+#         exponent = math.ceil(math.log10(1 / averaged_norm))
+# 
+#         if exponent > 0:
+#             new_lr = learning_rate / (10**exponent)
+#             lr_step = (new_lr - current_lr) / warmup_iters
+#             change_iters = warmup_iters  # We will transition over warmup_iters
+# 
+#     # If a change is queued, adjust linearly over warmup_iters iterations
+#     steps -= 1
+#     if change_iters > 0:
+#         steps = interval_iters
+#         change_iters -= 1
+#         current_lr += lr_step
+# 
+#     return current_lr
+
+import math
+from collections import deque
+
+interval_iters = 500
+norm_history = deque([0]*interval_iters, maxlen=interval_iters)
+
+# Global variables for tracking the state of change
+new_lr = learning_rate
+current_lr = learning_rate
+change_iters = 0  # Counter for how many iterations we've been changing the lr
+steps = 0
+
+check_change = 0
+averaged_norm = 1
+exp_2 = 0
+
+
+def get_lr(it, norm):
+    global current_lr, new_lr, change_iters, steps, lr_step, averaged_norm, check_change, exp_2
+    norm_history.append(norm)
+
+    # 1) Linear warmup for warmup_iters steps
+    if it < warmup_iters:
+        current_lr = learning_rate * it / warmup_iters
+        steps = interval_iters
+        return current_lr
+
+    # 2) Maintain learning rate for interval_iters
+    if steps < 1:
+        steps = interval_iters
+        if math.ceil(math.log10(1 / averaged_norm))==math.ceil(math.log10(1 /((sum(norm_history) / len(norm_history))))):
+            check_change += 1
+        else:
+            check_change = 0
+        averaged_norm = sum(norm_history) / len(norm_history)
+        exponent = math.ceil(math.log10(1 / averaged_norm))
+
+        if exponent > 0:
+            if check_change==4:
+                exp_2 += 1 if round(current_lr, 15) > min_lr else -1
+                check_change = 0
+            new_lr = learning_rate / (10**(exponent+exp_2)) 
+            new_lr = new_lr if new_lr > min_lr else min_lr
+            lr_step = (new_lr - current_lr) / warmup_iters
+            change_iters = warmup_iters  # We will transition over warmup_iters
+
+    # If a change is queued, adjust linearly over warmup_iters iterations
+    steps -= 1
+    if change_iters > 0:
+        steps = interval_iters
+        change_iters -= 1
+        current_lr += lr_step
+
+    return current_lr
+
 
 
 if wandb_log:
@@ -354,9 +412,10 @@ X, Y = train_data.get_batch("train")  # fetch the very first batch
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
 running_mfu = -1.0
+norm = 0
 while True:
     # determine and set the learning rate for this iteration
-    lr = get_lr(iter_num) if decay_lr else learning_rate
+    lr = get_lr(iter_num, norm) if decay_lr else learning_rate
     for param_group in optimizer.param_groups:
         param_group["lr"] = lr
 
@@ -433,8 +492,8 @@ while True:
             running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
         print(
             f"iter {iter_num}: train loss {lossf:.1e}, time {dt*1000:.2f}ms, "
-            f"norm {norm:.4f}, "
-            f"lr {lr:.4f}, "
+            f"norm {norm:.1e}, "
+            f"lr {lr:.1e}, "
             f"mfu {running_mfu*100:.2f}%"
         )
         if wandb_log:

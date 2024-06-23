@@ -4,10 +4,10 @@ from collections import deque
 import matplotlib.pyplot as plt
 import numpy as np
 
-learning_rate = 0.001  # initial learning rate
+learning_rate = 0.01  # initial learning rate
 min_lr = 1e-6
 warmup_iters = 200
-interval_iters = 1500
+interval_iters = 500
 norm_history = deque([0]*interval_iters, maxlen=interval_iters)
 
 # Global variables for tracking the state of change
@@ -15,10 +15,13 @@ new_lr = learning_rate
 current_lr = learning_rate
 change_iters = 0  # Counter for how many iterations we've been changing the lr
 steps = 0
+check_change = 0
+averaged_norm = 1
+exp_2 = 0
 
 
 def get_lr(it, norm):
-    global current_lr, new_lr, change_iters, steps, lr_step
+    global current_lr, new_lr, change_iters, steps, lr_step, averaged_norm, check_change, exp_2
     norm_history.append(norm)
 
     # 1) Linear warmup for warmup_iters steps
@@ -30,11 +33,19 @@ def get_lr(it, norm):
     # 2) Maintain learning rate for interval_iters
     if steps < 1:
         steps = interval_iters
+        if math.ceil(math.log10(1 / averaged_norm))==math.ceil(math.log10(1 /((sum(norm_history) / len(norm_history))))):
+            check_change += 1
+        else:
+            check_change = 0
         averaged_norm = sum(norm_history) / len(norm_history)
         exponent = math.ceil(math.log10(1 / averaged_norm))
 
         if exponent > 0:
-            new_lr = learning_rate / (10**exponent)
+            if check_change==4:
+                exp_2 += 1 if round(current_lr, 15) > min_lr else -1
+                check_change = 0
+            new_lr = learning_rate / (10**(exponent+exp_2)) 
+            new_lr = new_lr if new_lr > min_lr else min_lr
             lr_step = (new_lr - current_lr) / warmup_iters
             change_iters = warmup_iters  # We will transition over warmup_iters
 
@@ -51,7 +62,7 @@ def get_lr(it, norm):
 if __name__ == "__main__":
     # Example usage
     lrs = []
-    norm = np.linspace(0, 1, 100000)
+    norm = np.linspace(1, 0, 100000)
     for it in range(0, 100000):
         lr = get_lr(it, norm[it])
         lrs.append(lr)

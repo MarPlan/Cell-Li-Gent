@@ -21,8 +21,8 @@ class ModelArgs:
     pe_type: str = "RoPE"
     norm_type: str = "RMSNorm"
     dim_model: int = 256
-    dim_out: int = 5
-    dim_inp: int = 6
+    dim_out: int = 2
+    dim_inp: int = 5
     n_heads: int = 4
     seq_len: int = 256
     max_seq_len: int = 256
@@ -106,7 +106,73 @@ def apply_rotary_emb(
     # xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
     # return xq_out.type_as(xq), xk_out.type_as(xk)
 
+def get_relative_positions(seq_len: int):
+    x = torch.arange(seq_len,device="cuda")[None, :]
+    y = torch.arange(seq_len,device="cuda")[:, None]
+    return x - y
 
+
+def get_alibi_slope(nheads):
+    def get_slopes_power_of_2(nheads):
+        start = 2 ** (-(2 ** -(math.log2(nheads) - 3)))
+        ratio = start
+        return [start * ratio**i for i in range(nheads)]
+
+    if math.log2(nheads).is_integer():
+        return get_slopes_power_of_2(nheads)
+    else:
+        closest_power_of_2 = 2 ** math.floor(math.log2(nheads))
+        return torch.tensor(
+            get_slopes_power_of_2(closest_power_of_2)
+            + get_alibi_slope(2 * closest_power_of_2)[0::2][: nheads - closest_power_of_2]
+        ,device="cuda")
+
+#class CausalSelfAttention(nn.Module):
+#    def __init__(self, config) -> None:
+#        super().__init__()
+#        self.causal = True
+#        self.n_heads = config.n_heads
+#        self.scale = math.sqrt(config.dim_model)
+#        self.dropout = nn.Dropout(config.dropout)
+#        self.register_buffer("m", get_alibi_slope(self.n_heads))
+#        self.kqv = nn.Linear(config.dim_model, 3 * config.dim_model, bias=False)
+#        if self.causal:
+#            self.register_buffer(
+#                "mask", torch.tril(torch.ones(1, 1, config.max_seq_len, config.max_seq_len))
+#            )
+#
+#    def forward(self, x):
+#        batch_size, seq_len, _ = x.shape
+#
+#        key, query, value = self.kqv(x).chunk(3, dim=-1)
+#        key = key.view(batch_size, seq_len, self.n_heads, -1).permute(0, 2, 3, 1)
+#        # key.shape == (batch_size, n_heads, d_head, seq_len)
+#        query = query.view(batch_size, seq_len, self.n_heads, -1).transpose(1, 2)
+#        value = value.view(batch_size, seq_len, self.n_heads, -1).transpose(1, 2)
+#        # qv.shape == (batch_size, n_heads, seq_len, d_head)
+#
+#        bias = (self.m * get_relative_positions(seq_len)).unsqueeze(0)
+#        # bias.shape == (1, n_heads, seq_len, seq_len)
+#
+#        score = torch.matmul(query, key) / self.scale + bias
+#        # score.shape == (batch_size, n_heads, seq_len, seq_len)
+#
+#        if self.causal:
+#            score = score.masked_fill(
+#                self.mask[:, :, :seq_len, :seq_len] == 0, float("-inf")
+#            ).to(x.device)
+#
+#        attn = F.softmax(score, dim=-1)
+#        out = torch.matmul(attn, value)
+#        # out.shape == (batch_size, n_heads, seq_len, d_head)
+#        out = out.transpose(1, 2).reshape(batch_size, seq_len, -1)
+#        # out.shape == (batch_size, seq_len, d_model)
+#        out = self.dropout(out)
+#
+#        return out
+
+
+# from flash_attn import flash_attn_func
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -134,8 +200,10 @@ class CausalSelfAttention(nn.Module):
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
         self.n_heads = config.n_heads
+        self.num_heads = config.n_heads
         self.dim_model = config.dim_model
         self.dropout = config.dropout
+        self.slopes = get_alibi_slope(config.n_heads)
 
     def forward(self, x):
         # batch size, sequence length, embedding dimensionality (dim_model)
@@ -159,6 +227,13 @@ class CausalSelfAttention(nn.Module):
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
+
+#        # (batch_size, seqlen, nheads, headdim)
+#           q = q.transpose(1, 2)
+#           k = k.transpose(1, 2)
+#           v = v.transpose(1, 2)
+#        y = flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=True,
+#                window_size=(-1, -1), alibi_slopes=self.slopes, deterministic=False)
         y = F.scaled_dot_product_attention(
             q,
             k,
@@ -167,6 +242,7 @@ class CausalSelfAttention(nn.Module):
             dropout_p=self.dropout if self.training else 0,
             is_causal=True,
         )
+
         y = (
             y.transpose(1, 2).contiguous().view(B, T, C)
         )  # re-assemble all head outputs side by side
@@ -230,7 +306,7 @@ class Block(nn.Module):
         if config.norm_type == "RMSNorm":
             self.norm = RMSNorm(config.dim_model)
         else:
-            self.norm = nn.LayerNorm(config.dim_model, bias=False)
+            self.norm = nn.LayerNorm(config.dim_model, bias=config.bias)
         self.ln_1 = self.norm
         self.attn = CausalSelfAttention(config)
         self.ln_2 = self.norm
@@ -249,23 +325,23 @@ class Transformer(nn.Module):
         if config.pe_type != "RoPE":
             self.abs_pos = precompute_abs_pos(config)
             self.abs_pe = apply_absolute_emb
-        # else:
-        #     # some useful precompute for the RoPE relative positional embeddings
-        #     freqs_cos, freqs_sin = precompute_freqs_cis(self.params.dim // self.params.n_heads, self.params.max_seq_len)
-        #     self.register_buffer("freqs_cos", freqs_cos, persistent=False)
-        #     self.register_buffer("freqs_sin", freqs_sin, persistent=False)
+#        else:
+#             # some useful precompute for the RoPE relative positional embeddings
+#            freqs_cos, freqs_sin = precompute_freqs_cis(self.params.dim // self.params.n_heads, self.params.max_seq_len)
+#            self.register_buffer("freqs_cos", freqs_cos, persistent=False)
+#            self.register_buffer("freqs_sin", freqs_sin, persistent=False)
 
         self.transformer = nn.ModuleDict(
             dict(
-                inp_emb=nn.Linear(config.dim_inp, config.dim_model, bias=False),
+                inp_emb=nn.Linear(config.dim_inp, config.dim_model, bias=config.bias),
                 drop=nn.Dropout(config.dropout),
                 h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
                 ln_f=RMSNorm(config.dim_model)
                 if config.norm_type == "RMSNorm"
-                else nn.LayerNorm(config.dim_model, bias=False),
+                else nn.LayerNorm(config.dim_model, bias=config.bias),
             )
         )
-        self.output = nn.Linear(config.dim_model, config.dim_out, bias=False)
+        self.output = nn.Linear(config.dim_model, config.dim_out, bias=config.bias)
 
         # init all weights
         self.apply(self._init_weights)
@@ -290,7 +366,7 @@ class Transformer(nn.Module):
         x = self.transformer.inp_emb(x)
         if self.config.pe_type != "RoPE":
             x = self.abs_pe(x, self.abs_pos)
-        x = self.transformer.drop(x)
+            x = self.transformer.drop(x)
         # freqs_cos = self.freqs_cos[:seqlen]
         # freqs_sin = self.freqs_sin[:seqlen]
         for block in self.transformer.h:
@@ -372,7 +448,7 @@ class Transformer(nn.Module):
             self.config.seq_len,
         )
         # a single token is not correct this way
-        flops_per_token = 6 * N  + 12 * L * H * Q * T
+        flops_per_token = 6 * N + 12 * L * H * Q * T
         flops_per_fwdbwd = flops_per_token * T
         flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
         # express our flops throughput as ratio of A100 bfloat16 peak flops
