@@ -28,7 +28,6 @@ class BatteryData:
 
     def get_batch(self, split):
         """Prepare a batch of data tensors for the given 'split'."""
-        pred_horizon = 1  # factor for seq_len prediction horizon
         if split == "train":
             # We dont sample here because some data generation might have patterns that
             # repeat over a few consecutive time series
@@ -49,13 +48,14 @@ class BatteryData:
             )
         if split == "pred":
             # Using validation data
-            pred_horizon = 6  # factor for seq_len prediction horizon
-            seq_indices = np.random.randint(
-                np.ceil(self.n_series * 0.8) - 1, self.n_series, self.batch_size
-            )
-            start_indices = np.random.randint(
-                0, self.total_seq_len - pred_horizon * self.sub_seq_len, self.batch_size
-            )
+            # pred_horizon = 6  # factor for seq_len prediction horizon
+            # seq_indices = np.random.randint( np.ceil(self.n_series * 0.8) - 1, self.n_series, self.batch_size)
+            # start_indices = np.random.randint(
+            #     0, self.total_seq_len - pred_horizon * self.sub_seq_len, self.batch_size
+            # )
+            pred_horizon = 3*2048
+            seq_indices = np.array([2900,2901,2902,2903,2904,2905])
+            start_indices = np.array([4_000]*6)
 
         with h5py.File(self.file_path, "r") as file:
             data = file[self.dataset]  # Access the specified dataset
@@ -68,8 +68,7 @@ class BatteryData:
                     torch.from_numpy(
                         data[
                             seq_idx,
-                            start_idx : start_idx + pred_horizon * self.sub_seq_len,
-                            # :3,
+                            start_idx : start_idx +  (self.sub_seq_len if split != "pred" else pred_horizon),
                         ]
                     )
                     for seq_idx, start_idx in zip(seq_indices, start_indices)
@@ -86,8 +85,7 @@ class BatteryData:
                             seq_idx,
                             start_idx + 1 : start_idx
                             + 1
-                            + pred_horizon * self.sub_seq_len,
-                            # 1:,
+                            + (self.sub_seq_len if split != "pred" else pred_horizon),
                         ]
                     )
                     for seq_idx, start_idx in zip(seq_indices, start_indices)
@@ -106,4 +104,4 @@ class BatteryData:
                 y.to(self.device),
             )  # Standard tensor transfer to the specified device
 
-        return torch.round(x[:,:,:-1], decimals=4), torch.round(y[:,:,[3,4]], decimals=4)
+        return torch.round(x, decimals=4), torch.round(y, decimals=4)

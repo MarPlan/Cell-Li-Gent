@@ -1,10 +1,31 @@
 import glob
 
+import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 
 from tests.data_limits import verify_dataset_limits
 from util.config_data import check_scale_rescale, rescale_data, scale_data
+
+
+# Open the existing HDF5 file
+def copy_dataset(data_dir= "data/train/battery_data.h5", dataset="spme_training_scaled"):
+    with h5py.File(data_dir, "r") as file:
+        original_dataset = file[dataset]
+        # Create a new HDF5 file to store the copied dataset
+        with h5py.File("debug_data.h5", "w") as new_file:
+            # Create the new dataset with the same properties as the original
+            new_dataset = new_file.create_dataset(
+                "spme_training_scaled",
+                shape=(30, original_dataset.shape[1], original_dataset.shape[2]),
+                maxshape=(30, original_dataset.shape[1], original_dataset.shape[2]),
+                dtype=original_dataset.dtype,
+            )
+            # Copy attributes from the original dataset to the new dataset
+            for attr_name in ["info","dim_2","verified_values","min_values","max_values"]:
+                new_dataset.attrs[attr_name] = original_dataset.attrs[attr_name]
+            # Copy data in chunks to avoid using too much memory
+            new_dataset[:] = original_dataset[:30]
 
 
 def compare_dfn_spm():
@@ -106,11 +127,14 @@ def stack_spme_output_to_dataset():
 
 
 if __name__ == "__main__":
+    with h5py.File("debug_data.h5", "r") as file:
+        original_dataset = file["spme_training_scaled"]
+    copy_dataset()
     # compare_dfn_spm()
-    stack_spme_output_to_dataset()
-    data_file = "data/train/battery_data.h5"
-    dataset = "spme_training"
-    verify_dataset_limits(data_file=data_file, dataset=dataset)
-    scale_data(file_path=data_file, dataset_name=dataset)
-    rescale_data(file_path=data_file, dataset_name=dataset + "_scaled")
-    check_scale_rescale(file_path=data_file, dataset_name=dataset)
+    # stack_spme_output_to_dataset()
+    # data_file = "data/train/battery_data.h5"
+    # dataset = "spme_training"
+    # verify_dataset_limits(data_file=data_file, dataset=dataset)
+    # scale_data(file_path=data_file, dataset_name=dataset)
+    # rescale_data(file_path=data_file, dataset_name=dataset + "_scaled")
+    # check_scale_rescale(file_path=data_file, dataset_name=dataset)

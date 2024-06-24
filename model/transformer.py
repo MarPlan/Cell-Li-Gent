@@ -14,23 +14,26 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from flash_attn import flash_attn_func
 
 
 @dataclass
 class ModelArgs:
+    dim_out: int = 5
+    dim_inp: int = 6
     pe_type: str = "RoPE"
     norm_type: str = "RMSNorm"
     dim_model: int = 256
-    dim_out: int = 2
-    dim_inp: int = 5
     n_heads: int = 4
     seq_len: int = 256
     max_seq_len: int = 256
     rope_theta: float = 10000.0
-    dropout: float = 1.0
+    dropout: float = 0.0
     n_layer: int = 6
-    bias: bool = False  # do we use bias inside LayerNorm and Linear layers?
+    bias: bool = False
     act_type: str = "SwiGLU"
+    loss: str = "MSE"
+    reduction: str = "mean"
 
 
 def precompute_abs_pos(config: ModelArgs):
@@ -59,11 +62,6 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     freqs_cos = torch.cos(freqs)  # real part
     freqs_sin = torch.sin(freqs)  # imaginary part
     return freqs_cos, freqs_sin
-    # freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    # t = torch.arange(end, device=freqs.device, dtype=torch.float32)
-    # freqs = torch.outer(t, freqs)
-    # freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-    # return freqs_cis
 
 
 def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
@@ -106,9 +104,10 @@ def apply_rotary_emb(
     # xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
     # return xq_out.type_as(xq), xk_out.type_as(xk)
 
+
 def get_relative_positions(seq_len: int):
-    x = torch.arange(seq_len,device="cuda")[None, :]
-    y = torch.arange(seq_len,device="cuda")[:, None]
+    x = torch.arange(seq_len, device="cuda")[None, :]
+    y = torch.arange(seq_len, device="cuda")[:, None]
     return x - y
 
 
@@ -124,55 +123,13 @@ def get_alibi_slope(nheads):
         closest_power_of_2 = 2 ** math.floor(math.log2(nheads))
         return torch.tensor(
             get_slopes_power_of_2(closest_power_of_2)
-            + get_alibi_slope(2 * closest_power_of_2)[0::2][: nheads - closest_power_of_2]
-        ,device="cuda")
-
-#class CausalSelfAttention(nn.Module):
-#    def __init__(self, config) -> None:
-#        super().__init__()
-#        self.causal = True
-#        self.n_heads = config.n_heads
-#        self.scale = math.sqrt(config.dim_model)
-#        self.dropout = nn.Dropout(config.dropout)
-#        self.register_buffer("m", get_alibi_slope(self.n_heads))
-#        self.kqv = nn.Linear(config.dim_model, 3 * config.dim_model, bias=False)
-#        if self.causal:
-#            self.register_buffer(
-#                "mask", torch.tril(torch.ones(1, 1, config.max_seq_len, config.max_seq_len))
-#            )
-#
-#    def forward(self, x):
-#        batch_size, seq_len, _ = x.shape
-#
-#        key, query, value = self.kqv(x).chunk(3, dim=-1)
-#        key = key.view(batch_size, seq_len, self.n_heads, -1).permute(0, 2, 3, 1)
-#        # key.shape == (batch_size, n_heads, d_head, seq_len)
-#        query = query.view(batch_size, seq_len, self.n_heads, -1).transpose(1, 2)
-#        value = value.view(batch_size, seq_len, self.n_heads, -1).transpose(1, 2)
-#        # qv.shape == (batch_size, n_heads, seq_len, d_head)
-#
-#        bias = (self.m * get_relative_positions(seq_len)).unsqueeze(0)
-#        # bias.shape == (1, n_heads, seq_len, seq_len)
-#
-#        score = torch.matmul(query, key) / self.scale + bias
-#        # score.shape == (batch_size, n_heads, seq_len, seq_len)
-#
-#        if self.causal:
-#            score = score.masked_fill(
-#                self.mask[:, :, :seq_len, :seq_len] == 0, float("-inf")
-#            ).to(x.device)
-#
-#        attn = F.softmax(score, dim=-1)
-#        out = torch.matmul(attn, value)
-#        # out.shape == (batch_size, n_heads, seq_len, d_head)
-#        out = out.transpose(1, 2).reshape(batch_size, seq_len, -1)
-#        # out.shape == (batch_size, seq_len, d_model)
-#        out = self.dropout(out)
-#
-#        return out
+            + get_alibi_slope(2 * closest_power_of_2)[0::2][
+                : nheads - closest_power_of_2
+            ],
+            device="cuda",
+        )
 
 
-# from flash_attn import flash_attn_func
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -180,15 +137,12 @@ class CausalSelfAttention(nn.Module):
         self.pe_type = config.pe_type
         if config.pe_type == "RoPE":
             freqs_cos, freqs_sin = precompute_freqs_cis(
-                config.dim_model // config.n_heads, config.max_seq_len
+                config.dim_model // config.n_heads,
+                config.max_seq_len,
+                config.rope_theta,
             )
             self.register_buffer("freqs_cos", freqs_cos, persistent=False)
             self.register_buffer("freqs_sin", freqs_sin, persistent=False)
-            # self.freqs_cis = precompute_freqs_cis(
-            #     config.dim_model // config.n_heads,
-            #     config.max_seq_len * 2,
-            #     config.rope_theta,
-            # )
             self.rope = apply_rotary_emb
         # key, query, value projections for all heads, but in a batch
         self.c_attn = nn.Linear(
@@ -228,24 +182,39 @@ class CausalSelfAttention(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-#        # (batch_size, seqlen, nheads, headdim)
-#           q = q.transpose(1, 2)
-#           k = k.transpose(1, 2)
-#           v = v.transpose(1, 2)
-#        y = flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=True,
-#                window_size=(-1, -1), alibi_slopes=self.slopes, deterministic=False)
-        y = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            attn_mask=None,
-            dropout_p=self.dropout if self.training else 0,
-            is_causal=True,
-        )
+        if self.pe_type == "ALiBi":
+            # (batch_size, seqlen, nheads, headdim)
+            q = q.transpose(1, 2)
+            k = k.transpose(1, 2)
+            v = v.transpose(1, 2)
+            y = flash_attn_func(
+                q,
+                k,
+                v,
+                dropout_p=0.0,
+                softmax_scale=None,
+                causal=True,
+                window_size=(-1, -1),
+                alibi_slopes=self.slopes,
+                deterministic=False,
+            )
+            y = (
+                y.contiguous().view(B, T, C)
+            )  # re-assemble all head outputs side by side
 
-        y = (
-            y.transpose(1, 2).contiguous().view(B, T, C)
-        )  # re-assemble all head outputs side by side
+        else:
+            y = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=None,
+                dropout_p=self.dropout if self.training else 0,
+                is_causal=True,
+            )
+
+            y = (
+                y.transpose(1, 2).contiguous().view(B, T, C)
+            )  # re-assemble all head outputs side by side
 
         # output projection
         y = self.resid_dropout(self.c_proj(y))
@@ -291,15 +260,6 @@ class RMSNorm(nn.Module):
         return output * self.weight
 
 
-# class SwiGLU(nn.Module):
-#     def __init__(self):
-#         super(SwiGLU, self).__init__()
-#
-#     def forward(self, x: torch.Tensor) -> torch.Tensor:
-#         x, gate = x.chunk(2, dim=-1)
-#         return F.silu(gate) * x
-
-
 class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -322,14 +282,12 @@ class Transformer(nn.Module):
     def __init__(self, config: ModelArgs):
         super().__init__()
         self.config = config
-        if config.pe_type != "RoPE":
+        self.loss = config.loss
+        self.reduction = config.reduction
+
+        if config.pe_type == "APE":
             self.abs_pos = precompute_abs_pos(config)
             self.abs_pe = apply_absolute_emb
-#        else:
-#             # some useful precompute for the RoPE relative positional embeddings
-#            freqs_cos, freqs_sin = precompute_freqs_cis(self.params.dim // self.params.n_heads, self.params.max_seq_len)
-#            self.register_buffer("freqs_cos", freqs_cos, persistent=False)
-#            self.register_buffer("freqs_sin", freqs_sin, persistent=False)
 
         self.transformer = nn.ModuleDict(
             dict(
@@ -352,7 +310,7 @@ class Transformer(nn.Module):
                     p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer)
                 )
         # report number of parameters
-        print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
+        # print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -364,11 +322,9 @@ class Transformer(nn.Module):
 
     def forward(self, x: torch.Tensor, y=None):
         x = self.transformer.inp_emb(x)
-        if self.config.pe_type != "RoPE":
+        if self.config.pe_type == "APE":
             x = self.abs_pe(x, self.abs_pos)
             x = self.transformer.drop(x)
-        # freqs_cos = self.freqs_cos[:seqlen]
-        # freqs_sin = self.freqs_sin[:seqlen]
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -376,9 +332,15 @@ class Transformer(nn.Module):
             # if we are given some desired targets also calculate the loss
             out = self.output(x)
             if self.training:
-                loss = F.mse_loss(out, y, reduction='mean')
+                if self.loss == "MSE":
+                    loss = F.mse_loss(out, y, reduction=self.reduction)
+                if self.loss == "MAE":
+                    loss = F.smooth_l1_loss(out, y, reduction=self.reduction)
+                if self.loss == "LogCosh":
+                    loss = torch.log(torch.cosh(out - y))
+                    loss = loss.sum() if self.reduction == "sum" else loss.mean()
             else:
-                loss = F.mse_loss(out, y, reduction='mean')
+                loss = F.mse_loss(out, y, reduction="mean")
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             out = self.output(
@@ -414,16 +376,16 @@ class Transformer(nn.Module):
             {"params": decay_params, "weight_decay": weight_decay},
             {"params": nodecay_params, "weight_decay": 0.0},
         ]
-        num_decay_params = sum(p.numel() for p in decay_params)
-        num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print(
-            f"num decayed parameter tensors: {len(decay_params)}, "
-            f"with {num_decay_params:,} parameters"
-        )
-        print(
-            f"num non-decayed parameter tensors: {len(nodecay_params)}, "
-            f"with {num_nodecay_params:,} parameters"
-        )
+        # num_decay_params = sum(p.numel() for p in decay_params)
+        # num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        # print(
+        #     f"num decayed parameter tensors: {len(decay_params)}, "
+        #     f"with {num_decay_params:,} parameters"
+        # )
+        # print(
+        #     f"num non-decayed parameter tensors: {len(nodecay_params)}, "
+        #     f"with {num_nodecay_params:,} parameters"
+        # )
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
@@ -431,7 +393,7 @@ class Transformer(nn.Module):
         optimizer = torch.optim.AdamW(
             optim_groups, lr=learning_rate, betas=betas, **extra_args
         )
-        print(f"using fused AdamW: {use_fused}")
+        # print(f"using fused AdamW: {use_fused}")
 
         return optimizer
 
