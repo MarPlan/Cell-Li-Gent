@@ -34,6 +34,7 @@ class ModelArgs:
     act_type: str = "SwiGLU"
     loss: str = "MSE"
     reduction: str = "mean"
+    device: str = "cpu"
 
 
 def precompute_abs_pos(config: ModelArgs):
@@ -105,10 +106,10 @@ def apply_rotary_emb(
     # return xq_out.type_as(xq), xk_out.type_as(xk)
 
 
-def get_relative_positions(seq_len: int):
-    x = torch.arange(seq_len, device="cuda")[None, :]
-    y = torch.arange(seq_len, device="cuda")[:, None]
-    return x - y
+# def get_relative_positions(seq_len: int, device):
+#     x = torch.arange(seq_len, device="cuda")[None, :]
+#     y = torch.arange(seq_len, device="cuda")[:, None]
+#     return x - y
 
 
 def get_alibi_slope(nheads):
@@ -121,12 +122,11 @@ def get_alibi_slope(nheads):
         return get_slopes_power_of_2(nheads)
     else:
         closest_power_of_2 = 2 ** math.floor(math.log2(nheads))
-        return torch.tensor(
+        return (
             get_slopes_power_of_2(closest_power_of_2)
             + get_alibi_slope(2 * closest_power_of_2)[0::2][
                 : nheads - closest_power_of_2
-            ],
-            device="cuda",
+            ]
         )
 
 
@@ -157,7 +157,7 @@ class CausalSelfAttention(nn.Module):
         self.num_heads = config.n_heads
         self.dim_model = config.dim_model
         self.dropout = config.dropout
-        self.slopes = get_alibi_slope(config.n_heads)
+        self.slopes = torch.tensor(get_alibi_slope(config.n_heads), dtype=torch.float32, device=config.device)
 
     def forward(self, x):
         # batch size, sequence length, embedding dimensionality (dim_model)
@@ -198,8 +198,8 @@ class CausalSelfAttention(nn.Module):
                 alibi_slopes=self.slopes,
                 deterministic=False,
             )
-            y = (
-                y.contiguous().view(B, T, C)
+            y = y.contiguous().view(
+                B, T, C
             )  # re-assemble all head outputs side by side
 
         else:

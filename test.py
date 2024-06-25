@@ -140,7 +140,12 @@ def get_lr_trapz(it, norm):
 
 
 if __name__ == "__main__":
-    # Example usage
+    while True:
+        try:
+            t=3
+            break
+        except RuntimeError:
+            continue
     scheduler = LRScheduler(learning_rate, warmup_iters, max_iters, min_lr)
     lrs = []
     lr = learning_rate
