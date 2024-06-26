@@ -5,8 +5,10 @@ Keep warmup, min lr, scheduler fixed, linear decay to min lr within one epoch
 Use auto regressive for predciton/test/objective loss, meaning only current external
 """
 
+import fcntl
 import gc
 import os
+import time
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -25,8 +27,8 @@ from ConfigSpace import (
     Integer,
     Normal,
 )
+from smac import Callback, Scenario
 from smac import MultiFidelityFacade as MFFacade
-from smac import Scenario
 from smac.intensifier.hyperband import Hyperband
 
 from model.transformer import ModelArgs, Transformer
@@ -34,6 +36,33 @@ from util.prepare_data import BatteryData
 
 
 def train(config: ConfigurationSpace, seed: int = 420, budget=55):
+    def closest_size(batch_size, possible_sizes):
+        # Filter out sizes greater than batch_size and find the maximum of the remaining sizes
+        lower_sizes = [size for size in possible_sizes if size <= batch_size]
+        if not lower_sizes:
+            raise ValueError("No valid batch size found.")
+        return max(lower_sizes)
+
+    while True:
+        try:
+            with open("gpu_list.txt", "r+") as file:
+                # Try to lock the file
+                fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                gpu_list = file.readlines()
+                # Get the first GPU
+                device = gpu_list.pop(0).strip()
+                # Truncate the file and write the updated GPU list back to the file
+                file.seek(0)
+                file.truncate()
+                for g in gpu_list:
+                    file.write(g)
+                # Unlock the file
+                fcntl.flock(file, fcntl.LOCK_UN)
+                break
+        except (IOError, BlockingIOError):
+            # If file is already open, wait for 0.3 seconds and try again
+            time.sleep(0.1)
+
     seq_len = config["seq_len"]
     n_layer = config["n_layer"]
     n_heads = config["n_heads"]
@@ -48,12 +77,14 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     act_type = config["act_type"]
     max_iters = int(budget)
 
-    eval_interval = 1
+    eval_interval = 10
     eval_iters = 1
     dataset = "spme_training_scaled"
     data_file = os.path.abspath("data/train/battery_data.h5")
 
     batch_size = divmod(524_288, seq_len)[0]
+    possible_sizes = [16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048]
+    batch_size = closest_size(batch_size, possible_sizes)
     gradient_accumulation_steps = 1
     lr_decay_iter = 2060
     min_lr = learning_rate / 10
@@ -61,8 +92,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     beta1 = 0.9
     beta2 = 0.95
     grad_clip = 1.0
-    warmup_iters = 100
-    device = "cuda"
+    warmup_iters = 10
     dtype = (
         "bfloat16"
         if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
@@ -88,7 +118,11 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     while True:
         gc.collect()
         torch.cuda.empty_cache()
+        memory_allocated = torch.cuda.memory_allocated(device=device)
+        memory_reserved = torch.cuda.memory_reserved(device=device)
         try:
+            torch.manual_seed(seed)
+            np.random.seed(seed)
             train_data = BatteryData(data_file, dataset, batch_size, seq_len, device)
             model_args = ModelArgs(
                 n_layer=n_layer,
@@ -104,7 +138,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                 rope_theta=rope_theta,
                 reduction=reduction,
                 act_type=act_type,
-                device=device
+                device=device,
             )
             model = Transformer(model_args)
             model.to(device)
@@ -124,11 +158,25 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                 del X, Y, model, optimizer, scaler, train_data, model_args
                 batch_size //= 2
                 gradient_accumulation_steps *= 2
-                torch.manual_seed(seed)
-                np.random.seed(seed)
                 continue
             else:
-                raise e
+                while True:
+                    try:
+                        with open("gpu_list.txt", "a+") as file:
+                            # Try to lock the file
+                            fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            file.write(f"{device}\n")
+                            # Unlock the file
+                            fcntl.flock(file, fcntl.LOCK_UN)
+                            break
+                    except (IOError, BlockingIOError):
+                        # If file is already open, wait for 0.3 seconds and try again
+                        time.sleep(0.1)
+                del X, Y, model, optimizer, scaler, train_data, model_args
+                print(
+                    f"CUDA OOM, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
+                )
+                return 1e9
 
     @torch.no_grad()
     def estimate_loss(file_path=data_file, dataset_name=dataset):
@@ -234,10 +282,44 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
         if iter_num > max_iters:
             break
 
+    while True:
+        try:
+            with open("gpu_list.txt", "a+") as file:
+                # Try to lock the file
+                fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                file.write(f"{device}\n")
+                # Unlock the file
+                fcntl.flock(file, fcntl.LOCK_UN)
+                break
+        except (IOError, BlockingIOError):
+            # If file is already open, wait for 0.3 seconds and try again
+            time.sleep(0.1)
+
+    del X, Y, model, optimizer, scaler, train_data, model_args, loss, _
+
+    print(
+        f"Loss: {best_pred_loss:.2f}, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
+    )
+
     return best_pred_loss
 
 
 if __name__ == "__main__":
+    gpu_list = [
+        "cuda:0",
+        "cuda:1",
+        "cuda:2",
+        "cuda:3",
+        "cuda:4",
+        "cuda:5",
+        "cuda:6",
+        "cuda:7",
+    ]
+
+    with open("gpu_list.txt", "w") as file:
+        for gpu in gpu_list:
+            file.write(f"{gpu}\n")
+
     seed = 420
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -277,9 +359,7 @@ if __name__ == "__main__":
     cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
 
     forbidden_clause_1a = ForbiddenEqualsClause(cs["dim_model"], 32)
-    forbidden_clause_1b = ForbiddenInClause(
-        cs["n_heads"], [12, 32, 64, 96, 128, 192]
-    )
+    forbidden_clause_1b = ForbiddenInClause(cs["n_heads"], [12, 32, 64, 96, 128, 192])
     forbidden_clause_1 = ForbiddenAndConjunction(
         forbidden_clause_1a, forbidden_clause_1b
     )
@@ -303,7 +383,7 @@ if __name__ == "__main__":
     )
 
     forbidden_clause_5a = ForbiddenEqualsClause(cs["dim_model"], 512)
-    forbidden_clause_5b = ForbiddenInClause(cs["n_heads"], [12, 192])
+    forbidden_clause_5b = ForbiddenInClause(cs["n_heads"], [12, 96, 192])
     forbidden_clause_5 = ForbiddenAndConjunction(
         forbidden_clause_5a, forbidden_clause_5b
     )
@@ -324,11 +404,11 @@ if __name__ == "__main__":
         name="transformer",
         output_directory=Path(f"{Path.cwd()}/hpo"),
         deterministic=True,
-        n_trials=5,
-        termination_cost_threshold=0.1,
-        min_budget=2,  # mulitple of 50!
-        max_budget=8,  # mulitple of 50! 500: ~1/4 of dataset
-        n_workers=2,
+        n_trials=500,
+        termination_cost_threshold=0.01,
+        min_budget=30,
+        max_budget=250,
+        n_workers=8,
     )
 
     # We want to run five random configurations before starting the optimization.
@@ -336,6 +416,15 @@ if __name__ == "__main__":
 
     # Create our intensifier
     intensifier = Hyperband(scenario, incumbent_selection="highest_budget")
+
+    class CustomCallback(Callback):
+        def __init__(self) -> None:
+            pass
+
+        def on_iteration_start(self, smbo) -> None:
+            gc.collect()
+            torch.cuda.empty_cache()
+            return None
 
     # Create our SMAC object and pass the scenario and the train method
     smac = MFFacade(

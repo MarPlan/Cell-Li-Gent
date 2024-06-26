@@ -139,13 +139,68 @@ def get_lr_trapz(it, norm):
     return current_lr
 
 
-if __name__ == "__main__":
+import time
+import fcntl
+
+
+def submit():
     while True:
         try:
-            t=3
-            break
-        except RuntimeError:
-            continue
+            with open("gpu_list.txt", "r+") as file:
+                # Try to lock the file
+                fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                gpu_list = file.readlines()
+                # Get the first GPU
+                gpu = gpu_list.pop(0).strip()
+                # Truncate the file and write the updated GPU list back to the file
+                file.seek(0)
+                file.truncate()
+                for g in gpu_list:
+                    file.write(g)
+                # Unlock the file
+                fcntl.flock(file, fcntl.LOCK_UN)
+                return gpu
+        except (IOError, BlockingIOError):
+            # If file is already open, wait for 0.3 seconds and try again
+            time.sleep(0.1)
+
+def train(gpu):
+    while True:
+        try:
+            with open("gpu_list.txt", "a+") as file:
+                # Try to lock the file
+                fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                file.write(f"{gpu}\n")
+                # Unlock the file
+                fcntl.flock(file, fcntl.LOCK_UN)
+                return
+        except (IOError, BlockingIOError):
+            # If file is already open, wait for 0.3 seconds and try again
+            time.sleep(0.1)
+
+
+if __name__ == "__main__":
+    # Initial setup to create the GPU list file (run this once)
+    gpu_list = [
+        "cuda:0",
+        "cuda:1",
+        "cuda:2",
+        "cuda:3",
+        "cuda:4",
+        "cuda:5",
+        "cuda:6",
+        "cuda:7",
+    ]
+    with open("gpu_list.txt", "w") as file:
+        for gpu in gpu_list:
+            file.write(f"{gpu}\n")
+
+    # Allocating a GPU
+    for _ in range(7):
+        gpu = submit()
+        train(gpu)
+        print(gpu)
+
     scheduler = LRScheduler(learning_rate, warmup_iters, max_iters, min_lr)
     lrs = []
     lr = learning_rate
