@@ -63,27 +63,49 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
             # If file is already open, wait for 0.3 seconds and try again
             time.sleep(0.1)
 
+    # TODO: Add slice for Y to select out dim
+    # slice = slice(:,:,1:)
     seq_len = config["seq_len"]
     n_layer = config["n_layer"]
     n_heads = config["n_heads"]
     dim_model = config["dim_model"]
-    bias = config["bias"]
+    bias = False
     learning_rate = config["learning_rate"]
     pe_type = config["pe_type"]
     rope_theta = config["rope_theta"] if pe_type == "RoPE" else 10000.0
-    loss = config["loss"]
+    loss_type = config["loss"]
     norm_type = config["norm_type"]
     reduction = config["reduction"]
-    act_type = config["act_type"]
-    max_iters = int(budget)
+    act_type = "SwiGLU"
+    max_iters = np.floor(budget)
 
-    eval_interval = 10
+    eval_interval = np.floor(max_iters/4)
     eval_iters = 1
     dataset = "spme_training_scaled"
     data_file = os.path.abspath("data/train/battery_data.h5")
 
     batch_size = divmod(524_288, seq_len)[0]
-    possible_sizes = [16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048]
+    possible_sizes = [
+        # 16,
+        # 24,
+        # 32,
+        # 48,
+        # 64,
+        # 96,
+        # 128,
+        192,
+        256,
+        384,
+        512,
+        768,
+        # 1024,
+        # 1536,
+        # 2048,
+        # 3072,
+        # 4096,
+        # 6144,
+        # 8192,
+    ]
     batch_size = closest_size(batch_size, possible_sizes)
     gradient_accumulation_steps = 1
     lr_decay_iter = 2060
@@ -115,68 +137,6 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
         if device_type == "cpu"
         else torch.autocast(device_type=device_type, dtype=ptdtype)
     )
-    while True:
-        gc.collect()
-        torch.cuda.empty_cache()
-        memory_allocated = torch.cuda.memory_allocated(device=device)
-        memory_reserved = torch.cuda.memory_reserved(device=device)
-        try:
-            torch.manual_seed(seed)
-            np.random.seed(seed)
-            train_data = BatteryData(data_file, dataset, batch_size, seq_len, device)
-            model_args = ModelArgs(
-                n_layer=n_layer,
-                n_heads=n_heads,
-                dim_model=dim_model,
-                seq_len=seq_len,
-                max_seq_len=seq_len,
-                bias=bias,
-                dropout=0,
-                pe_type=pe_type,
-                loss=loss,
-                norm_type=norm_type,
-                rope_theta=rope_theta,
-                reduction=reduction,
-                act_type=act_type,
-                device=device,
-            )
-            model = Transformer(model_args)
-            model.to(device)
-            scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
-            optimizer = model.configure_optimizers(
-                weight_decay, learning_rate, (beta1, beta2), device_type
-            )
-            model = torch.compile(model)
-            model.train()
-            X, Y = train_data.get_batch("train")
-            with ctx:
-                _ = model(X, Y[:, :, 1:])
-            del _
-            break
-        except RuntimeError as e:
-            if "out of memory" in str(e) and batch_size > 16:
-                del X, Y, model, optimizer, scaler, train_data, model_args
-                batch_size //= 2
-                gradient_accumulation_steps *= 2
-                continue
-            else:
-                while True:
-                    try:
-                        with open("gpu_list.txt", "a+") as file:
-                            # Try to lock the file
-                            fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                            file.write(f"{device}\n")
-                            # Unlock the file
-                            fcntl.flock(file, fcntl.LOCK_UN)
-                            break
-                    except (IOError, BlockingIOError):
-                        # If file is already open, wait for 0.3 seconds and try again
-                        time.sleep(0.1)
-                del X, Y, model, optimizer, scaler, train_data, model_args
-                print(
-                    f"CUDA OOM, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
-                )
-                return 1e9
 
     @torch.no_grad()
     def estimate_loss(file_path=data_file, dataset_name=dataset):
@@ -254,33 +214,100 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     lr_schedul = LRScheduler(
         learning_rate, warmup_iters, max_iters, min_lr, lr_decay_iter
     )
-    lr = learning_rate
-    iter_num = 0
-    best_pred_loss = 1e9
     while True:
-        lr = lr_schedul.get_lr(iter_num, lr)
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = lr
-        if (iter_num % eval_interval == 0) and (iter_num > 0):
-            losses = estimate_loss()
-            if losses["pred"] < best_pred_loss:
-                best_pred_loss = losses["pred"]
-
-        for micro_step in range(gradient_accumulation_steps):
-            with ctx:
-                _, loss = model(X, Y[:, :, 1:])
-                loss = loss / gradient_accumulation_steps
+        gc.collect()
+        torch.cuda.empty_cache()
+        memory_allocated = torch.cuda.memory_allocated(device=device)
+        memory_reserved = torch.cuda.memory_reserved(device=device)
+        try:
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+            train_data = BatteryData(data_file, dataset, batch_size, seq_len, device)
+            model_args = ModelArgs(
+                n_layer=n_layer,
+                n_heads=n_heads,
+                dim_model=dim_model,
+                seq_len=seq_len,
+                max_seq_len=seq_len,
+                bias=bias,
+                dropout=0,
+                pe_type=pe_type,
+                loss=loss_type,
+                norm_type=norm_type,
+                rope_theta=rope_theta,
+                reduction=reduction,
+                act_type=act_type,
+                device=device,
+            )
+            model = Transformer(model_args)
+            model.to(device)
+            scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
+            optimizer = model.configure_optimizers(
+                weight_decay, learning_rate, (beta1, beta2), device_type
+            )
+            model = torch.compile(model)
+            model.train()
             X, Y = train_data.get_batch("train")
-            scaler.scale(loss).backward()
-        if grad_clip != 0.0:
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        scaler.step(optimizer)
-        scaler.update()
-        optimizer.zero_grad(set_to_none=True)
-        iter_num += 1
-        if iter_num > max_iters:
+
+            lr = learning_rate
+            iter_num = 0
+            best_pred_loss = 1e9
+            while True:
+                lr = lr_schedul.get_lr(iter_num, lr)
+                for param_group in optimizer.param_groups:
+                    param_group["lr"] = lr
+                del param_group
+                if (iter_num % eval_interval == 0) and (iter_num > 0):
+                    losses = estimate_loss()
+                    if losses["pred"] < best_pred_loss:
+                        best_pred_loss = losses["pred"]
+                for micro_step in range(gradient_accumulation_steps):
+                    with ctx:
+                        _, loss = model(X, Y[:, :, 1:])
+                        loss = loss / gradient_accumulation_steps
+                    X, Y = train_data.get_batch("train")
+                    scaler.scale(loss).backward()
+                del loss, _
+                torch.cuda.empty_cache()
+                if grad_clip != 0.0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                iter_num += 1
+                if iter_num > max_iters:
+                    break
             break
+        except RuntimeError as e:
+            if "out of memory" in str(e) and batch_size > 16:
+                # TODO: delete loss if exists
+                del X, Y, model, optimizer
+                # del param_group
+                # fored but cant get rid of around 20MB memalloc after model crashes, perhaps pytroch
+                torch._C._cuda_clearCublasWorkspaces()
+                batch_size //= 2
+                gradient_accumulation_steps *= 2
+            else:
+                while True:
+                    try:
+                        with open("gpu_list.txt", "a+") as file:
+                            # Try to lock the file
+                            fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            file.write(f"{device}\n")
+                            # Unlock the file
+                            fcntl.flock(file, fcntl.LOCK_UN)
+                            break
+                    except (IOError, BlockingIOError):
+                        # If file is already open, wait for 0.3 seconds and try again
+                        time.sleep(0.1)
+                del X, Y, model, optimizer, scaler, train_data, model_args
+                # del param_group
+                torch._C._cuda_clearCublasWorkspaces()
+                print(
+                    f"CUDA OOM, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
+                )
+                return 1e7
 
     while True:
         try:
@@ -295,7 +322,9 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
             # If file is already open, wait for 0.3 seconds and try again
             time.sleep(0.1)
 
-    del X, Y, model, optimizer, scaler, train_data, model_args, loss, _
+    del X, Y, model, optimizer, model_args
+    # del param_group
+    torch.cuda.empty_cache()
 
     print(
         f"Loss: {best_pred_loss:.2f}, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
@@ -310,10 +339,10 @@ if __name__ == "__main__":
         "cuda:1",
         "cuda:2",
         "cuda:3",
-        "cuda:4",
-        "cuda:5",
-        "cuda:6",
-        "cuda:7",
+        # "cuda:4",
+        # "cuda:5",
+        # "cuda:6",
+        # "cuda:7",
     ]
 
     with open("gpu_list.txt", "w") as file:
@@ -327,95 +356,75 @@ if __name__ == "__main__":
         name="transformer",
         seed=seed,
         space={
-            "pe_type": Categorical("pe_type", ["RoPE", "ALiBi", "APE"]),
+            "pe_type": Categorical("pe_type", ["RoPE", "ALiBi"]),
             "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
             "rope_theta": Integer("rope_theta", bounds=(10, 200_000), log=True),
-            "act_type": Categorical("act_type", ["SwiGLU", "GeLU"]),
-            "loss": Categorical("loss", ["MSE", "MAE", "LogCosh"]),
+            "loss": Categorical("loss", ["MSE", "MAE"]),
             "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
-                "dim_model", [32, 64, 128, 256, 512, 768], ordered=True
+                "dim_model", [4, 6, 8, 16, 32, 64, 128, 256, 384], ordered=True
             ),
             "n_heads": Categorical(
                 "n_heads",
-                [4, 8, 12, 16, 32, 64, 96, 128, 192],
+                [2, 4, 8, 12, 16, 32, 64, 96],
                 ordered=True,
             ),
-            "seq_len": Categorical(
-                "seq_len", [128, 256, 512, 768, 1024, 1536, 2048], ordered=True
-            ),
-            "n_layer": Integer("n_layer", bounds=(4, 16)),
-            "bias": Categorical("bias", [True, False], default=False),
+            "seq_len": Categorical("seq_len", [768, 1024, 1536, 2048], ordered=True),
+            "n_layer": Integer("n_layer", bounds=(12, 40)),
+            # "bias": Categorical("bias", [True, False], default=False),
             "learning_rate": Float(
                 "learning_rate",
                 bounds=(1e-5, 1e-2),
-                log=True,
-                default=1e-3,
-                distribution=Normal(mu=5e-3, sigma=3),
+                # log=True,
+                default=1.5e-3,
+                distribution=Normal(mu=5e-3, sigma=2),
             ),
         },
     )
 
     cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
 
-    forbidden_clause_1a = ForbiddenEqualsClause(cs["dim_model"], 32)
-    forbidden_clause_1b = ForbiddenInClause(cs["n_heads"], [12, 32, 64, 96, 128, 192])
-    forbidden_clause_1 = ForbiddenAndConjunction(
-        forbidden_clause_1a, forbidden_clause_1b
-    )
+    # Function to find the forbidden heads for a given dim_model.
+    def forbidden_heads_for_dim_model(dim_model, n_heads):
+        return [head for head in n_heads if head >= dim_model or dim_model % head != 0]
 
-    forbidden_clause_2a = ForbiddenEqualsClause(cs["dim_model"], 64)
-    forbidden_clause_2b = ForbiddenInClause(cs["n_heads"], [12, 64, 96, 128, 192])
-    forbidden_clause_2 = ForbiddenAndConjunction(
-        forbidden_clause_2a, forbidden_clause_2b
-    )
-
-    forbidden_clause_3a = ForbiddenEqualsClause(cs["dim_model"], 128)
-    forbidden_clause_3b = ForbiddenInClause(cs["n_heads"], [12, 96, 128, 192])
-    forbidden_clause_3 = ForbiddenAndConjunction(
-        forbidden_clause_3a, forbidden_clause_3b
-    )
-
-    forbidden_clause_4a = ForbiddenEqualsClause(cs["dim_model"], 256)
-    forbidden_clause_4b = ForbiddenInClause(cs["n_heads"], [12, 96, 192])
-    forbidden_clause_4 = ForbiddenAndConjunction(
-        forbidden_clause_4a, forbidden_clause_4b
-    )
-
-    forbidden_clause_5a = ForbiddenEqualsClause(cs["dim_model"], 512)
-    forbidden_clause_5b = ForbiddenInClause(cs["n_heads"], [12, 96, 192])
-    forbidden_clause_5 = ForbiddenAndConjunction(
-        forbidden_clause_5a, forbidden_clause_5b
-    )
+    # Creating all forbidden clauses.
+    forbidden_clauses = []
+    for dim_model in cs["dim_model"].values():
+        forbidden_heads = forbidden_heads_for_dim_model(
+            dim_model, cs["n_heads"].values()
+        )
+        if forbidden_heads:
+            forbidden_dim_clause = ForbiddenEqualsClause(cs["dim_model"], dim_model)
+            forbidden_heads_clause = ForbiddenInClause(cs["n_heads"], forbidden_heads)
+            forbidden_clauses.append(
+                ForbiddenAndConjunction(forbidden_dim_clause, forbidden_heads_clause)
+            )
 
     cs.add_forbidden_clauses(
         [
-            forbidden_clause_1,
-            forbidden_clause_2,
-            forbidden_clause_3,
-            forbidden_clause_4,
-            forbidden_clause_5,
+            forbidden_clauses,
         ]
     )
 
     # Scenario object specifying the optimization environment
     scenario = Scenario(
         configspace=cs,
-        name="transformer",
+        name="transformer_1",
         output_directory=Path(f"{Path.cwd()}/hpo"),
         deterministic=True,
-        n_trials=500,
+        n_trials=750,
         termination_cost_threshold=0.01,
         min_budget=30,
         max_budget=250,
-        n_workers=8,
+        n_workers=1,
     )
 
     # We want to run five random configurations before starting the optimization.
     initial_design = MFFacade.get_initial_design(scenario, n_configs=5)
 
     # Create our intensifier
-    intensifier = Hyperband(scenario, incumbent_selection="highest_budget")
+    intensifier = Hyperband(scenario, eta=6, incumbent_selection="highest_budget")
 
     class CustomCallback(Callback):
         def __init__(self) -> None:

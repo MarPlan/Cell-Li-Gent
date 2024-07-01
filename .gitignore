@@ -10,5 +10,6 @@ ckpt/
 misc.py
 vastai.md
 doc/.ipynb_checkpoints/
+hpo/
 
 !data/current/drive_cycle/

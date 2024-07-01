@@ -157,7 +157,9 @@ class CausalSelfAttention(nn.Module):
         self.num_heads = config.n_heads
         self.dim_model = config.dim_model
         self.dropout = config.dropout
-        self.slopes = torch.tensor(get_alibi_slope(config.n_heads), dtype=torch.float32, device=config.device)
+        self.slopes = torch.tensor(
+            get_alibi_slope(config.n_heads), dtype=torch.float32, device=config.device
+        )
 
     def forward(self, x):
         # batch size, sequence length, embedding dimensionality (dim_model)
@@ -324,7 +326,7 @@ class Transformer(nn.Module):
         x = self.transformer.inp_emb(x)
         if self.config.pe_type == "APE":
             x = self.abs_pe(x, self.abs_pos)
-            x = self.transformer.drop(x)
+        x = self.transformer.drop(x)
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -337,7 +339,7 @@ class Transformer(nn.Module):
                 if self.loss == "MAE":
                     loss = F.smooth_l1_loss(out, y, reduction=self.reduction)
                 if self.loss == "LogCosh":
-                    loss = torch.log(torch.cosh(out - y))
+                    loss = Transformer.log_cosh_loss(out, y)
                     loss = loss.sum() if self.reduction == "sum" else loss.mean()
             else:
                 loss = F.mse_loss(out, y, reduction="mean")
@@ -349,6 +351,13 @@ class Transformer(nn.Module):
             loss = None
 
         return out, loss
+
+    @staticmethod
+    def log_cosh_loss(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+        def _log_cosh(x: torch.Tensor) -> torch.Tensor:
+            return x + torch.nn.functional.softplus(-2.0 * x) - math.log(2.0)
+
+        return _log_cosh(y_pred - y_true)
 
     def get_num_params(self, non_embedding=False):
         """

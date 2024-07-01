@@ -1,13 +1,3 @@
-# prepare data to a python binary pickle file for fast read speed
-# dull dataset size determination: llama3: 8B params = 15T token (1 token = 1 [U,I,V] datapoint)
-# dull dataset size determination: chinchilla: 8B params = 200B token (1 token = 1 [U,I,V] datapoint) (Meta homepage: https://ai.meta.com/blog/meta-llama-3/)
-
-# My model: 500M params -> 12M token -> 12B datapoint of [U,I,V] ,respectively ~~ calc 120GB data (Chinchilla, considering as lower bound for sufficient results)
-# My model: 500M params -> 1T token (based on llama) -> 1T datapoint of [U,I,V] ,respectively ~~ calc 12TB data even beyond chinchilla log-linear improvemtne if more tokens trained on!
-
-# My model realistic: 100M params -> 2B Token -> 24GB data, but karpathys 9B~17GB binary data
-
-
 import h5py
 import numpy as np
 import torch
@@ -53,9 +43,9 @@ class BatteryData:
             # start_indices = np.random.randint(
             #     0, self.total_seq_len - pred_horizon * self.sub_seq_len, self.batch_size
             # )
-            pred_horizon = 3*2048
-            seq_indices = np.array([2900,2901,2902,2903,2904,2905])
-            start_indices = np.array([4_000]*6)
+            pred_horizon = 4 * 2048
+            seq_indices = np.array([2900, 2901, 2902, 2903, 2904, 2905])
+            start_indices = np.array([2_000] * 6)
 
         with h5py.File(self.file_path, "r") as file:
             data = file[self.dataset]  # Access the specified dataset
@@ -68,7 +58,8 @@ class BatteryData:
                     torch.from_numpy(
                         data[
                             seq_idx,
-                            start_idx : start_idx +  (self.sub_seq_len if split != "pred" else pred_horizon),
+                            start_idx : start_idx
+                            + (self.sub_seq_len if split != "pred" else pred_horizon),
                         ]
                     )
                     for seq_idx, start_idx in zip(seq_indices, start_indices)

@@ -181,6 +181,16 @@ def train(gpu):
 
 if __name__ == "__main__":
     # Initial setup to create the GPU list file (run this once)
+    def closest_size(batch_size, possible_sizes):
+        # Filter out sizes greater than batch_size and find the maximum of the remaining sizes
+        lower_sizes = [size for size in possible_sizes if size <= batch_size]
+        if not lower_sizes:
+            raise ValueError("No valid batch size found.")
+        return max(lower_sizes)
+
+    batch_size = divmod(524_288, 1536)[0]
+    possible_sizes = [16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048]
+    test = closest_size(batch_size, possible_sizes)
     gpu_list = [
         "cuda:0",
         "cuda:1",
