@@ -9,8 +9,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mamba_ssm.models.config_mamba import MambaConfig
-from mamba_ssm.models.mixer_seq_simple import create_block, _init_weights
+from mamba_ssm.models.mixer_seq_simple import _init_weights, create_block
 from mamba_ssm.utils.generation import GenerationMixin
 
 try:
@@ -24,10 +23,13 @@ class ModelArgs:
     dim_out: int = 5
     dim_inp: int = 6
     device: str = "cpu"
-    dtype: str = "float16"
+    dtype: torch.dtype = torch.bfloat16
     dim_model: int = 256 # hidden size
     n_layer: int = 24
     d_intermediate: int = 1  # MLP after mixer
+
+    def __post_init__(self):
+        self.factory_kwargs = {"device": self.device, "dtype": self.dtype}
 
 
 class MixerModel(nn.Module):
@@ -91,7 +93,7 @@ class MixerModel(nn.Module):
             partial(
                 _init_weights,
                 n_layer=n_layer,
-                **(initializer_cfg if initializer_cfg is not None else {}),
+                # **(initializer_cfg if initializer_cfg is not None else {}),
                 n_residuals_per_layer=1
                 if d_intermediate == 0
                 else 2,  # 2 if we have MLP
@@ -148,7 +150,7 @@ class MambaLMHeadModel(nn.Module, GenerationMixin):
         rms_norm = True
         residual_in_fp32 = False
         fused_add_norm = False
-        factory_kwargs = {"device": device, "dtype": dtype}
+        factory_kwargs = config.factory_kwargs
 
         super().__init__()
         self.backbone = MixerModel(
@@ -172,7 +174,7 @@ class MambaLMHeadModel(nn.Module, GenerationMixin):
             partial(
                 _init_weights,
                 n_layer=n_layer,
-                **(initializer_cfg if initializer_cfg is not None else {}),
+                # **(initializer_cfg if initializer_cfg is not None else {}),
             )
         )
 

@@ -19,6 +19,7 @@ import torch.nn.functional as F
 from ConfigSpace import (
     Categorical,
     ConfigurationSpace,
+    Integer,
 )
 from model.mamba import MambaLMHeadModel, ModelArgs
 from smac import Callback, Scenario
@@ -215,7 +216,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                     dim_out = 5,
                     dim_inp = 6,
                     device = device,
-                    dtype = dtype,
+                    dtype = ptdtype,
                     dim_model = dim_model, # hidden size
                     n_layer = n_layer,
                     d_intermediate = d_intermediate,  # MLP after mixer
@@ -226,7 +227,6 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
             optimizer = model.configure_optimizers(
                 weight_decay, learning_rate, (beta1, beta2), device_type
             )
-            model = torch.compile(model)
             model.train()
             X, Y = train_data.get_batch("train")
 
@@ -307,6 +307,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                 print(
                     f"CUDA OOM, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
                 )
+                print(e)
                 return 1e7
 
     while True:
@@ -360,10 +361,10 @@ if __name__ == "__main__":
         space={
             "d_intermediate" : Categorical("d_intermediate", [0,1], ordered=True),
             "dim_model": Categorical(
-                "dim_model", [4, 6, 8, 16, 32, 64, 128, 256, 384], ordered=True
+                "dim_model", [256, 512, 768], ordered=True
             ),
             "seq_len": Categorical("seq_len", [512, 768, 1024, 1536, 2048], ordered=True),
-            "n_layer": Integer("n_layer", bounds=(6, 50)),
+            "n_layer": Integer("n_layer", bounds=(6, 30)),
         },
     )
 
@@ -376,8 +377,8 @@ if __name__ == "__main__":
         n_trials=150,
         termination_cost_threshold=0.01,
         min_budget=20,
-        max_budget=250,
-        n_workers=4,
+        max_budget=150,
+        n_workers=1,
     )
 
     # We want to run five random configurations before starting the optimization.
