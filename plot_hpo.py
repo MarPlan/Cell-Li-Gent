@@ -30,82 +30,60 @@ def plot_hpo_partial(save=False):
     cs = ConfigurationSpace(
         name="transformer",
         space={
-            "pe_type": Categorical("pe_type", ["RoPE", "ALiBi", "APE"]),
-            "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
-            "rope_theta": Integer("rope_theta", bounds=(10, 200_000), log=True),
-            "act_type": Categorical("act_type", ["SwiGLU", "GeLU"]),
-            "loss": Categorical("loss", ["MSE", "MAE", "LogCosh"]),
-            "reduction": Categorical("reduction", ["sum", "mean"]),
+            # "pe_type": Categorical("pe_type", ["RoPE", "ALiBi"]),
+            # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
+            "rope_theta": Float(
+                "rope_theta", bounds=(500, 200_000), log=True, default=12_000
+            ),
+            # "loss": Categorical("loss", ["MSE", "MAE"]),
+            # "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
-                "dim_model", [32, 64, 128, 256, 512, 768], ordered=True
+                "dim_model", [4, 6, 8, 16, 32, 64, 128, 256, 384], ordered=True
             ),
             "n_heads": Categorical(
                 "n_heads",
-                [4, 8, 12, 16, 32, 64, 96, 128, 192],
+                [2, 4, 8, 12, 16, 32, 64, 96],
                 ordered=True,
             ),
-            "seq_len": Categorical(
-                "seq_len", [128, 256, 512, 768, 1024, 1536, 2048], ordered=True
-            ),
-            "n_layer": Integer("n_layer", bounds=(4, 16)),
-            "bias": Categorical("bias", [True, False], default=False),
-            "learning_rate": Float(
-                "learning_rate",
-                bounds=(1e-5, 1e-2),
-                log=True,
-                default=1e-3,
-                distribution=Normal(mu=5e-3, sigma=3),
-            ),
+            "seq_len": Categorical("seq_len", [768, 1024, 1536, 2048], ordered=True),
+            "n_layer": Integer("n_layer", bounds=(12, 40)),
+            # "bias": Categorical("bias", [True, False], default=False),
+            # "learning_rate": Float(
+            #    "learning_rate",
+            #    bounds=(1e-5, 1e-2),
+            #    # log=True,
+            #    default=1.5e-3,
+            #    distribution=Normal(mu=5e-3, sigma=2),
+            # ),
         },
     )
 
-    cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
+    # cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
 
-    forbidden_clause_1a = ForbiddenEqualsClause(cs["dim_model"], 32)
-    forbidden_clause_1b = ForbiddenInClause(cs["n_heads"], [12, 32, 64, 96, 128, 192])
-    forbidden_clause_1 = ForbiddenAndConjunction(
-        forbidden_clause_1a, forbidden_clause_1b
-    )
+    # Function to find the forbidden heads for a given dim_model.
+    def forbidden_heads_for_dim_model(dim_model, n_heads):
+        return [head for head in n_heads if head >= dim_model or dim_model % head != 0]
 
-    forbidden_clause_2a = ForbiddenEqualsClause(cs["dim_model"], 64)
-    forbidden_clause_2b = ForbiddenInClause(cs["n_heads"], [12, 64, 96, 128, 192])
-    forbidden_clause_2 = ForbiddenAndConjunction(
-        forbidden_clause_2a, forbidden_clause_2b
-    )
+    # Creating all forbidden clauses.
+    forbidden_clauses = []
+    for dim_model in cs["dim_model"].sequence:
+        forbidden_heads = forbidden_heads_for_dim_model(
+            dim_model, cs["n_heads"].sequence
+        )
+        if forbidden_heads:
+            forbidden_dim_clause = ForbiddenEqualsClause(cs["dim_model"], dim_model)
+            forbidden_heads_clause = ForbiddenInClause(cs["n_heads"], forbidden_heads)
+            forbidden_clauses.append(
+                ForbiddenAndConjunction(forbidden_dim_clause, forbidden_heads_clause)
+            )
 
-    forbidden_clause_3a = ForbiddenEqualsClause(cs["dim_model"], 128)
-    forbidden_clause_3b = ForbiddenInClause(cs["n_heads"], [12, 96, 128, 192])
-    forbidden_clause_3 = ForbiddenAndConjunction(
-        forbidden_clause_3a, forbidden_clause_3b
-    )
-
-    forbidden_clause_4a = ForbiddenEqualsClause(cs["dim_model"], 256)
-    forbidden_clause_4b = ForbiddenInClause(cs["n_heads"], [12, 96, 192])
-    forbidden_clause_4 = ForbiddenAndConjunction(
-        forbidden_clause_4a, forbidden_clause_4b
-    )
-
-    forbidden_clause_5a = ForbiddenEqualsClause(cs["dim_model"], 512)
-    forbidden_clause_5b = ForbiddenInClause(cs["n_heads"], [12, 96, 192])
-    forbidden_clause_5 = ForbiddenAndConjunction(
-        forbidden_clause_5a, forbidden_clause_5b
-    )
-
-    cs.add_forbidden_clauses(
-        [
-            forbidden_clause_1,
-            forbidden_clause_2,
-            forbidden_clause_3,
-            forbidden_clause_4,
-            forbidden_clause_5,
-        ]
-    )
+    cs.add_forbidden_clauses(forbidden_clauses)
 
     # Create a RunHistory object
     runhistory = RunHistory()
 
     # Load the run history from a JSON file
-    runhistory.load("hpo/transformer/0/runhistory.json", cs)
+    runhistory.load("hpo/transformer_4/0/runhistory.json", cs)
 
     # Extract the configuration IDs and corresponding costs
     extracted_data = {"config_id": [], "cost": [], "starttime": [], "endtime": []}
@@ -124,18 +102,19 @@ def plot_hpo_partial(save=False):
     ]
 
     # Define the mappings
-    activation_function_map = {"GeLU": 0, "SwiGLU": 1}
-    loss_function_map = {"MAE": 0, "LogCosh": 1, "MSE": 2}
-    normalization_map = {"RMSNorm": 0, "LayerNorm": 1}
-    positional_encoding_map = {"ALiBi": 0, "APE": 1, "RoPE": 2}
-    reduction_map = {"sum": 0, "mean": 1}
+    # activation_function_map = {"GeLU": 0, "SwiGLU": 1}
+    # loss_function_map = {"MAE": 0, "MSE": 1}
+    # normalization_map = {"RMSNorm": 0, "LayerNorm": 1}
+    # positional_encoding_map = {"ALiBi": 0, "RoPE": 1}
+    # reduction_map = {"sum": 0, "mean": 1}
+
     # Encode the data
-    for item in hyperparameters:
-        item['act_type'] = activation_function_map[item['act_type']]
-        item['loss'] = loss_function_map[item['loss']]
-        item['norm_type'] = normalization_map[item['norm_type']]
-        item['pe_type'] = positional_encoding_map[item['pe_type']]
-        item['reduction'] = reduction_map[item['reduction']]
+    # for item in hyperparameters:
+        # item['act_type'] = activation_function_map[item['act_type']]
+        # item['loss'] = loss_function_map[item['loss']]
+        # item['norm_type'] = normalization_map[item['norm_type']]
+        # item['pe_type'] = positional_encoding_map[item['pe_type']]
+        # item['reduction'] = reduction_map[item['reduction']]
 
     # Convert the hyperparameters to a format suitable for the Result object
     hypparam_names=list(cs.keys())
@@ -151,7 +130,9 @@ def plot_hpo_partial(save=False):
     # Assume `hyperparameters` is a list of configurations and `costs` is a list of corresponding costs
     hyperparameters = np.array(hyperparameters).astype(np.float64)
     costs = np.array(extracted_data["cost"]).astype(np.float64)
-    costs[np.isinf(costs)] = 100
+    mask = costs != 1e7
+    costs = costs[mask]
+    hyperparameters = hyperparameters[mask]
 
     space = Space([(hp.min(), hp.max()) for hp in hyperparameters.T])
 
@@ -200,7 +181,9 @@ def plot_hpo_partial(save=False):
     # _ = plot_evaluations(result)
     ax = plot_objective(
         result,
-        levels=3,
+        n_points=120,
+        sample_source="result",
+        levels=6,
         # cmap=mpl.colormaps["YlOrRd"],
         cmap="YlOrRd",
         dimensions=hypparam_names,
@@ -383,8 +366,7 @@ def plot_hpo_partial(save=False):
     )
 
     plt.show()
-    tt = 8
 
 
 if __name__ == "__main__":
-    plot_hpo_partial(save=True)
+    plot_hpo_partial()

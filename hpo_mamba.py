@@ -19,20 +19,12 @@ import torch.nn.functional as F
 from ConfigSpace import (
     Categorical,
     ConfigurationSpace,
-    Float,
-    ForbiddenAndConjunction,
-    ForbiddenEqualsClause,
-    ForbiddenInClause,
-    Integer,
 )
+from model.mamba import MambaLMHeadModel, ModelArgs
 from smac import Callback, Scenario
 from smac import MultiFidelityFacade as MFFacade
 from smac.intensifier.hyperband import Hyperband
-
-from model.transformer import ModelArgs, Transformer
 from util.prepare_data import BatteryData
-
-# torch._dynamo.config.cache_size_limit = 512
 
 
 def train(config: ConfigurationSpace, seed: int = 420, budget=55):
@@ -67,18 +59,12 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     # slice = slice(:,:,1:)
     seq_len = config["seq_len"]
     n_layer = config["n_layer"]
-    n_heads = config["n_heads"]
     dim_model = config["dim_model"]
-    bias = False
-    learning_rate = 2e-3
-    pe_type = "RoPE"
-    rope_theta = config["rope_theta"]
-    loss_type = "MSE"
-    norm_type = "RMSNorm"
-    reduction = "mean"
-    act_type = "SwiGLU"
-    max_iters = np.floor(budget)
+    d_intermediate = config["d_intermediate"]
 
+
+    learning_rate = 2e-3
+    max_iters = np.floor(budget)
     eval_interval = np.floor(max_iters / 4)
     eval_iters = 1
     dataset = "spme_training_scaled"
@@ -226,22 +212,15 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
             np.random.seed(seed)
             train_data = BatteryData(data_file, dataset, batch_size, seq_len, device)
             model_args = ModelArgs(
-                n_layer=n_layer,
-                n_heads=n_heads,
-                dim_model=dim_model,
-                seq_len=seq_len,
-                max_seq_len=seq_len,
-                bias=bias,
-                dropout=0,
-                pe_type=pe_type,
-                loss=loss_type,
-                norm_type=norm_type,
-                rope_theta=rope_theta,
-                reduction=reduction,
-                act_type=act_type,
-                device=device,
+                    dim_out = 5,
+                    dim_inp = 6,
+                    device = device,
+                    dtype = dtype,
+                    dim_model = dim_model, # hidden size
+                    n_layer = n_layer,
+                    d_intermediate = d_intermediate,  # MLP after mixer
             )
-            model = Transformer(model_args)
+            model = MambaLMHeadModel(model_args)
             model.to(device)
             scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
             optimizer = model.configure_optimizers(
@@ -376,65 +355,25 @@ if __name__ == "__main__":
     np.random.seed(seed)
 
     cs = ConfigurationSpace(
-        name="transformer",
+        name="mamba",
         seed=seed,
         space={
-            # "pe_type": Categorical("pe_type", ["RoPE", "ALiBi"]),
-            # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
-            "rope_theta": Float(
-                "rope_theta", bounds=(500, 200_000), log=True, default=12_000
-            ),
-            # "loss": Categorical("loss", ["MSE", "MAE"]),
-            # "reduction": Categorical("reduction", ["sum", "mean"]),
+            "d_intermediate" : Categorical("d_intermediate", [0,1], ordered=True),
             "dim_model": Categorical(
                 "dim_model", [4, 6, 8, 16, 32, 64, 128, 256, 384], ordered=True
             ),
-            "n_heads": Categorical(
-                "n_heads",
-                [2, 4, 8, 12, 16, 32, 64, 96],
-                ordered=True,
-            ),
-            "seq_len": Categorical("seq_len", [768, 1024, 1536, 2048], ordered=True),
-            "n_layer": Integer("n_layer", bounds=(12, 40)),
-            # "bias": Categorical("bias", [True, False], default=False),
-            # "learning_rate": Float(
-            #    "learning_rate",
-            #    bounds=(1e-5, 1e-2),
-            #    # log=True,
-            #    default=1.5e-3,
-            #    distribution=Normal(mu=5e-3, sigma=2),
-            # ),
+            "seq_len": Categorical("seq_len", [512, 768, 1024, 1536, 2048], ordered=True),
+            "n_layer": Integer("n_layer", bounds=(6, 50)),
         },
     )
-
-    # cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
-
-    # Function to find the forbidden heads for a given dim_model.
-    def forbidden_heads_for_dim_model(dim_model, n_heads):
-        return [head for head in n_heads if head >= dim_model or dim_model % head != 0]
-
-    # Creating all forbidden clauses.
-    forbidden_clauses = []
-    for dim_model in cs["dim_model"].sequence:
-        forbidden_heads = forbidden_heads_for_dim_model(
-            dim_model, cs["n_heads"].sequence
-        )
-        if forbidden_heads:
-            forbidden_dim_clause = ForbiddenEqualsClause(cs["dim_model"], dim_model)
-            forbidden_heads_clause = ForbiddenInClause(cs["n_heads"], forbidden_heads)
-            forbidden_clauses.append(
-                ForbiddenAndConjunction(forbidden_dim_clause, forbidden_heads_clause)
-            )
-
-    cs.add_forbidden_clauses(forbidden_clauses)
 
     # Scenario object specifying the optimization environment
     scenario = Scenario(
         configspace=cs,
-        name="transformer_2",
+        name="mamba",
         output_directory=Path(f"{Path.cwd()}/hpo"),
         deterministic=True,
-        n_trials=250,
+        n_trials=150,
         termination_cost_threshold=0.01,
         min_budget=20,
         max_budget=250,
