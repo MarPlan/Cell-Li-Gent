@@ -7,20 +7,17 @@ Minor adjustments for a different model, data and single GPU only
 """
 
 import argparse
-import math
 import os
 import time
 from contextlib import nullcontext
 
-import matplotlib.pyplot as plt
+import h5py
+import numpy as np
 import torch
 import torch.nn.functional as F
 import wandb
-import numpy as np
 
 from model.transformer import ModelArgs, Transformer
-from tests.data_limits import verify_dataset_limits
-from util.config_data import scale_data
 from util.prepare_data import BatteryData
 
 parser = argparse.ArgumentParser()
@@ -102,32 +99,34 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 # data
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
-gradient_accumulation_steps = 4  # used to simulate larger batch sizes
-batch_size = 64 # if gradient_accumulation_steps > 1, this is the micro-batch size
+
+gradient_accumulation_steps = 2  # used to simulate larger batch sizes
+batch_size = 256 // gradient_accumulation_steps # 524_288 if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 2048
 # model
-n_layer = 12
-n_heads = 12
-dim_model = 768
+n_layer = 18
+n_heads = 8
+dim_model = 384
+learning_rate = 1e-3 # max learning rate
+min_lr = 1e-7  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+warmup_iters = 200  # how many steps to warm up for
+max_iters = np.floor(
+    3_000*0.8 * 360_000 // (gradient_accumulation_steps * batch_size * seq_len)
+) * 2 # total number of training iterations
+lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
+
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 3e-2 # max learning rate
 # step =  batch_size * seq_len * gradient_accumulation_steps # 32_768 datapoints per iteration
 # iterations = 3_000*360_000 / step # iterations for one epoch
 # batches * time series resulting in iteration for one epoch
-max_iters = (
-    3_000 * 360_000 // (gradient_accumulation_steps * batch_size * seq_len)
-) * 20 # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True  # whether to decay the learning rate
-warmup_iters = 200  # how many steps to warm up for
-lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
-min_lr = 3e-7  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # system
 device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', 'mps'
 # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
@@ -258,137 +257,84 @@ if compile:
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
-def estimate_loss():
+def estimate_loss(file_path=data_file, dataset_name=dataset):
     out = {}
     model.eval()
-    for split in ["train", "val"]:  # , "pred"]:
+    for split in ["pred"]:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             X, Y = train_data.get_batch(split)
-            if split == "pred":
-                print("pred mode")
-                y_hat = []
-                with ctx:
-                    input = X[:, :seq_len]
-                    for i in range(seq_len):
-                        y, _ = model(input)
-                        y_hat.append(y)
-                        input = torch.roll(input, -1, 1)
-                        input[:, -1, 0] = X[:, seq_len + i, 0]
-                        input[:, -1, 1:3] = y[:, -1, :2]
-                    y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
-                    losses[k] = F.mse_loss(Y[:, seq_len:], y_hat)
-                    # check_in_out(X[:,seq_len:].cpu(), Y[:,seq_len:].cpu(), y_hat.cpu())
-                if k == 1:
-                    break
-            else:
-                with ctx:
-                    _, loss = model(X, Y)
-                losses[k] = loss.item()
-        out[split] = losses.mean()
+            y_hat = []
+            with ctx:
+                input = X[:, :seq_len]
+                for i in range(4096):
+                    y, _ = model(input)
+                    y_hat.append(y)
+                    input = torch.roll(input, -1, 1)
+                    input[:, -1, :3] = X[:, seq_len + i, :3]
+                    input[:, -1, 3:] = y[:, -1, 2:]
+                y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
+                # Perform the rescaling using broadcasting
+                with h5py.File(file_path, "r") as file:
+                    data_scaled = file[dataset_name]
+                    mins, maxs = (
+                        data_scaled.attrs["min_values"],
+                        data_scaled.attrs["max_values"],
+                    )
+                maxs_expanded = torch.tensor(
+                    maxs[np.newaxis, np.newaxis, :], device=X.device
+                )
+                mins_expanded = torch.tensor(
+                    mins[np.newaxis, np.newaxis, :], device=X.device
+                )
+                # X = X * (maxs_expanded - mins_expanded) + mins_expanded
+                Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
+                y_hat = (
+                    y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
+                        + mins_expanded[:, :, 1:]
+                )
+                losses[k] = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
+        out[split] = losses.mean().to("cpu").item()
     model.train()
     return out
 
 
-# learning rate decay scheduler (cosine with warmup)
-# def get_lr(it):
-    ## 1) linear warmup for warmup_iters steps
-    #if it < warmup_iters:
-    #    return learning_rate * it / warmup_iters
-    ## 2) if it > lr_decay_iters, return min learning rate
-    #if it > lr_decay_iters:
-    #    return min_lr
-    ## 3) in between, use cosine decay down to min learning rate
-    #decay_ratio = (it - warmup_iters) / (lr_decay_iters - warmup_iters)
-    #assert 0 <= decay_ratio <= 1
-    #coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
-    #return min_lr + coeff * (learning_rate - min_lr)
-
-# def get_lr(it, norm):
-#     global current_lr, new_lr, change_iters, steps, lr_step
-#     norm_history.append(norm)
-# 
-#     # 1) Linear warmup for warmup_iters steps
-#     if it < warmup_iters:
-#         current_lr = learning_rate * it / warmup_iters
-#         steps = interval_iters
-#         return current_lr
-# 
-#     # 2) Maintain learning rate for interval_iters
-#     if steps < 1:
-#         steps = interval_iters
-#         averaged_norm = sum(norm_history) / len(norm_history)
-#         exponent = math.ceil(math.log10(1 / averaged_norm))
-# 
-#         if exponent > 0:
-#             new_lr = learning_rate / (10**exponent)
-#             lr_step = (new_lr - current_lr) / warmup_iters
-#             change_iters = warmup_iters  # We will transition over warmup_iters
-# 
-#     # If a change is queued, adjust linearly over warmup_iters iterations
-#     steps -= 1
-#     if change_iters > 0:
-#         steps = interval_iters
-#         change_iters -= 1
-#         current_lr += lr_step
-# 
-#     return current_lr
-
-import math
-from collections import deque
-
-interval_iters = 500
-norm_history = deque([0]*interval_iters, maxlen=interval_iters)
-
-# Global variables for tracking the state of change
-new_lr = learning_rate
-current_lr = learning_rate
-change_iters = 0  # Counter for how many iterations we've been changing the lr
-steps = 0
-
-check_change = 0
-averaged_norm = 1
-exp_2 = 0
 
 
-def get_lr(it, norm):
-    global current_lr, new_lr, change_iters, steps, lr_step, averaged_norm, check_change, exp_2
-    norm_history.append(norm)
+# learning rate decay scheduler (warmup, linear decay, cool down to 0)
+class LRScheduler:
+    def __init__(
+        self, learning_rate, warmup_iters, max_iters, min_lr, lr_decay_iter
+    ):
+        self.learning_rate = learning_rate
+        self.warmup_iters = warmup_iters
+        self.max_iters = max_iters
+        self.min_lr = min_lr
+        self.decay = True
+        self.lr_step = 0
+        self.lr_decay_iter = lr_decay_iter
 
-    # 1) Linear warmup for warmup_iters steps
-    if it < warmup_iters:
-        current_lr = learning_rate * it / warmup_iters
-        steps = interval_iters
-        return current_lr
-
-    # 2) Maintain learning rate for interval_iters
-    if steps < 1:
-        steps = interval_iters
-        if math.ceil(math.log10(1 / averaged_norm))==math.ceil(math.log10(1 /((sum(norm_history) / len(norm_history))))):
-            check_change += 1
+    def get_lr(self, it, lr_prev):
+        if it < self.warmup_iters:
+            return self.learning_rate * it / self.warmup_iters
+        if it > (self.max_iters - self.warmup_iters):
+            if self.decay:
+                self.lr_step = lr_prev / self.warmup_iters
+                self.decay = False
+            lr_prev -= self.lr_step
+            return lr_prev
+        if lr_prev > self.min_lr:
+            self.lr_step = (self.learning_rate - self.min_lr) / (
+                self.lr_decay_iter - self.warmup_iters
+            )
+            lr_prev -= self.lr_step
+            return lr_prev
         else:
-            check_change = 0
-        averaged_norm = sum(norm_history) / len(norm_history)
-        exponent = math.ceil(math.log10(1 / averaged_norm))
+            return lr_prev
 
-        if exponent > 0:
-            if check_change==4:
-                exp_2 += 1 if round(current_lr, 15) > min_lr else -1
-                check_change = 0
-            new_lr = learning_rate / (10**(exponent+exp_2)) 
-            new_lr = new_lr if new_lr > min_lr else min_lr
-            lr_step = (new_lr - current_lr) / warmup_iters
-            change_iters = warmup_iters  # We will transition over warmup_iters
-
-    # If a change is queued, adjust linearly over warmup_iters iterations
-    steps -= 1
-    if change_iters > 0:
-        steps = interval_iters
-        change_iters -= 1
-        current_lr += lr_step
-
-    return current_lr
-
+lr_scheduler = LRScheduler(
+    learning_rate, warmup_iters, max_iters, min_lr, lr_decay_iters
+)
 
 
 if wandb_log:
@@ -396,26 +342,15 @@ if wandb_log:
     wandb.init(dir=out_dir, project=wandb_project, name=wandb_run_name, config=config)
 
 
-def print_gpu_memory():
-    if torch.cuda.is_available():
-        memory_allocated = torch.cuda.memory_allocated()
-        memory_reserved = torch.cuda.memory_reserved()
-
-        print(f"Memory Allocated: {memory_allocated / (1024 ** 2):.2f} MB")
-        print(f"Memory Reserved: {memory_reserved / (1024 ** 2):.2f} MB")
-    else:
-        print("CUDA is not available.")
-
-
 # training loop
 X, Y = train_data.get_batch("train")  # fetch the very first batch
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
 running_mfu = -1.0
-norm = 0
+lr = 0
 while True:
     # determine and set the learning rate for this iteration
-    lr = get_lr(iter_num, norm) if decay_lr else learning_rate
+    lr = lr_scheduler.get_lr(iter_num, lr) if decay_lr else learning_rate
     for param_group in optimizer.param_groups:
         param_group["lr"] = lr
 
@@ -436,7 +371,6 @@ while True:
                     "model_args": model_args,
                     "iter_num": iter_num,
                     "best_val_loss": best_val_loss,
-                    # "pred_loss": losses["pred"],
                     "config": config,
                 }
                 print(f"saving checkpoint to {out_dir}")
@@ -445,7 +379,6 @@ while True:
                     checkpoint,
                     os.path.join(
                         out_dir,
-                        # f"{checkpoint['best_val_loss']:.1e}_val_loss_{checkpoint['pred_loss']:.1e}_pred_loss.pt",
                         f"{checkpoint['best_val_loss']:.1e}_val_loss.pt",
                     ),
                 )
@@ -473,8 +406,6 @@ while True:
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
 
-    if print_gpu:
-        print_gpu_memory()
     # timing and logging
     t1 = time.time()
     dt = t1 - t0

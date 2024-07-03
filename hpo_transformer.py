@@ -152,8 +152,8 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                         y, _ = model(input)
                         y_hat.append(y)
                         input = torch.roll(input, -1, 1)
-                        input[:, -1, 0] = X[:, seq_len + i, 0]
-                        input[:, -1, 1:] = y[:, -1, :]
+                        input[:, -1, :3] = X[:, seq_len + i, :3]
+                        input[:, -1, 3:] = y[:, -1, 2:]
                     y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                     # Perform the rescaling using broadcasting
                     with h5py.File(file_path, "r") as file:
