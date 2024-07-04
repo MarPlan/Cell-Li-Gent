@@ -384,9 +384,7 @@ if __name__ == "__main__":
         space={
             "pe_type": Categorical("pe_type", ["RoPE", "APE", "ALiBi"]),
             # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
-            "rope_theta": Float(
-                "rope_theta", bounds=(500, 200_000), log=True
-            ),
+            "rope_theta": Float("rope_theta", bounds=(500, 200_000), log=True),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
             # "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
@@ -430,6 +428,13 @@ if __name__ == "__main__":
             )
 
     cs.add_forbidden_clauses(forbidden_clauses)
+
+    forbidden_dim_flash_attn = ForbiddenEqualsClause(cs["dim_model"], 786)
+    forbidden_head_flash_attn = ForbiddenEqualsClause(cs["n_heads"], 2)
+    forbidden_flash_attn = ForbiddenAndConjunction(
+        forbidden_dim_flash_attn, forbidden_head_flash_attn
+    )
+    cs.add_forbidden_clauses([forbidden_flash_attn])
 
     # Scenario object specifying the optimization environment
     scenario = Scenario(

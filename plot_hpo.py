@@ -30,23 +30,21 @@ def plot_hpo_partial(save=False):
     cs = ConfigurationSpace(
         name="transformer",
         space={
-            # "pe_type": Categorical("pe_type", ["RoPE", "ALiBi"]),
+            "pe_type": Categorical("pe_type", ["RoPE", "APE", "ALiBi"]),
             # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
-            "rope_theta": Float(
-                "rope_theta", bounds=(500, 200_000), log=True, default=12_000
-            ),
+            "rope_theta": Float("rope_theta", bounds=(500, 200_000), log=True),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
             # "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
-                "dim_model", [4, 6, 8, 16, 32, 64, 128, 256, 384], ordered=True
+                "dim_model", [64, 128, 256, 384, 512, 786], ordered=True
             ),
             "n_heads": Categorical(
                 "n_heads",
-                [2, 4, 8, 12, 16, 32, 64, 96],
+                [2, 4, 8, 12, 16, 32, 64],
                 ordered=True,
             ),
-            "seq_len": Categorical("seq_len", [768, 1024, 1536, 2048], ordered=True),
-            "n_layer": Integer("n_layer", bounds=(12, 40)),
+            "seq_len": Categorical("seq_len", [256, 512, 1024, 2048], ordered=True),
+            "n_layer": Integer("n_layer", bounds=(8, 25)),
             # "bias": Categorical("bias", [True, False], default=False),
             # "learning_rate": Float(
             #    "learning_rate",
@@ -58,7 +56,7 @@ def plot_hpo_partial(save=False):
         },
     )
 
-    # cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
+    cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
 
     # Function to find the forbidden heads for a given dim_model.
     def forbidden_heads_for_dim_model(dim_model, n_heads):
@@ -79,11 +77,18 @@ def plot_hpo_partial(save=False):
 
     cs.add_forbidden_clauses(forbidden_clauses)
 
+    forbidden_dim_flash_attn = ForbiddenEqualsClause(cs["dim_model"], 786)
+    forbidden_head_flash_attn = ForbiddenEqualsClause(cs["n_heads"], 2)
+    forbidden_flash_attn = ForbiddenAndConjunction(
+        forbidden_dim_flash_attn, forbidden_head_flash_attn
+    )
+    cs.add_forbidden_clauses([forbidden_flash_attn])
+
     # Create a RunHistory object
     runhistory = RunHistory()
 
     # Load the run history from a JSON file
-    runhistory.load("hpo/transformer_4/0/runhistory.json", cs)
+    runhistory.load("hpo/transformer_10/0/runhistory.json", cs)
 
     # Extract the configuration IDs and corresponding costs
     extracted_data = {"config_id": [], "cost": [], "starttime": [], "endtime": []}
@@ -105,19 +110,19 @@ def plot_hpo_partial(save=False):
     # activation_function_map = {"GeLU": 0, "SwiGLU": 1}
     # loss_function_map = {"MAE": 0, "MSE": 1}
     # normalization_map = {"RMSNorm": 0, "LayerNorm": 1}
-    # positional_encoding_map = {"ALiBi": 0, "RoPE": 1}
+    positional_encoding_map = {"ALiBi": 0,"RoPE": 1, "APE":2}
     # reduction_map = {"sum": 0, "mean": 1}
 
     # Encode the data
-    # for item in hyperparameters:
-        # item['act_type'] = activation_function_map[item['act_type']]
-        # item['loss'] = loss_function_map[item['loss']]
-        # item['norm_type'] = normalization_map[item['norm_type']]
-        # item['pe_type'] = positional_encoding_map[item['pe_type']]
-        # item['reduction'] = reduction_map[item['reduction']]
+    for item in hyperparameters:
+    # item['act_type'] = activation_function_map[item['act_type']]
+    # item['loss'] = loss_function_map[item['loss']]
+    # item['norm_type'] = normalization_map[item['norm_type']]
+        item['pe_type'] = positional_encoding_map[item['pe_type']]
+    # item['reduction'] = reduction_map[item['reduction']]
 
     # Convert the hyperparameters to a format suitable for the Result object
-    hypparam_names=list(cs.keys())
+    hypparam_names = list(cs.keys())
     hyperparameters = [
         [
             config[name] if name != "rope_theta" else (config.get(name, 66_666))
@@ -125,7 +130,6 @@ def plot_hpo_partial(save=False):
         ]
         for config in hyperparameters
     ]
-
 
     # Assume `hyperparameters` is a list of configurations and `costs` is a list of corresponding costs
     hyperparameters = np.array(hyperparameters).astype(np.float64)
@@ -136,7 +140,6 @@ def plot_hpo_partial(save=False):
 
     space = Space([(hp.min(), hp.max()) for hp in hyperparameters.T])
 
-
     # Define standard scalers for X and y separately
     scaler_X = StandardScaler()
     scaler_y = StandardScaler()
@@ -146,6 +149,7 @@ def plot_hpo_partial(save=False):
     y_scaled = scaler_y.fit_transform(costs.reshape(-1, 1)).flatten()
 
     from sklearn.neighbors import KNeighborsClassifier
+
     # Define your SVR model
     svr = SVR()
 
@@ -166,7 +170,9 @@ def plot_hpo_partial(save=False):
             y_pred_scaled = self.svr_model.predict(X_scaled)
 
             # Unscale the predictions
-            y_pred_unscaled = self.scaler_y.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
+            y_pred_unscaled = self.scaler_y.inverse_transform(
+                y_pred_scaled.reshape(-1, 1)
+            ).flatten()
 
             return y_pred_unscaled
 

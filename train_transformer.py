@@ -100,19 +100,28 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
 
-gradient_accumulation_steps = 2  # used to simulate larger batch sizes
-batch_size = 256 // gradient_accumulation_steps # 524_288 if gradient_accumulation_steps > 1, this is the micro-batch size
+gradient_accumulation_steps = 1  # used to simulate larger batch sizes
+batch_size = (
+    256 // gradient_accumulation_steps
+)  # 524_288 if gradient_accumulation_steps > 1, this is the micro-batch size
+
+rope_theta = 7295
+pe_type = "RoPE"
 seq_len = 2048
 # model
-n_layer = 18
-n_heads = 8
-dim_model = 384
-learning_rate = 1e-3 # max learning rate
+n_layer = 19
+n_heads = 64
+dim_model = 128
+learning_rate = 2e-3  # max learning rate
 min_lr = 1e-7  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 warmup_iters = 200  # how many steps to warm up for
-max_iters = np.floor(
-    3_000*0.8 * 360_000 // (gradient_accumulation_steps * batch_size * seq_len)
-) * 2 # total number of training iterations
+decay_iters = 1000  # how many steps to decay for ~1 epoch to min_lr
+max_iters = (
+    np.floor(
+        3_000 * 0.8 * 360_000 // (gradient_accumulation_steps * batch_size * seq_len)
+    )
+    * 40
+)  # total number of training iterations
 lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
 
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
@@ -194,6 +203,7 @@ ctx = (
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
 iter_num = 0
 best_val_loss = 1e9
+best_pred_loss = 1e9
 # -----------------------------------------------------------------------------
 # data init
 # verify_dataset_limits(data_file = data_file, dataset=dataset)
@@ -201,6 +211,7 @@ best_val_loss = 1e9
 train_data = BatteryData(data_file, dataset, batch_size, seq_len, device)
 # model init
 model_args = ModelArgs(
+    rope_theta=rope_theta,
     n_layer=n_layer,
     n_heads=n_heads,
     dim_model=dim_model,
@@ -208,7 +219,8 @@ model_args = ModelArgs(
     max_seq_len=seq_len,
     bias=bias,
     dropout=dropout,
-    pe_type = "RoPE",
+    pe_type=pe_type,
+    device=device
 )  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
@@ -255,86 +267,131 @@ if compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 
-# FIX: add val and train loss
-# helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
 def estimate_loss(file_path=data_file, dataset_name=dataset):
     out = {}
     model.eval()
-    for split in ["pred"]:
+    for split in ["train", "val", "pred"]:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             X, Y = train_data.get_batch(split)
-            y_hat = []
-            with ctx:
-                input = X[:, :seq_len]
-                for i in range(4096):
-                    y, _ = model(input)
-                    y_hat.append(y)
-                    input = torch.roll(input, -1, 1)
-                    input[:, -1, :3] = X[:, seq_len + i, :3]
-                    input[:, -1, 3:] = y[:, -1, 2:]
-                y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
-                # Perform the rescaling using broadcasting
-                with h5py.File(file_path, "r") as file:
-                    data_scaled = file[dataset_name]
-                    mins, maxs = (
-                        data_scaled.attrs["min_values"],
-                        data_scaled.attrs["max_values"],
+            if split == "pred":
+                y_hat = []
+                with ctx:
+                    input = X[:, :seq_len]
+                    for i in range(6144):
+                        y, _ = model(input)
+                        y_hat.append(y)
+                        input = torch.roll(input, -1, 1)
+                        input[:, -1, :3] = X[:, seq_len + i, :3]
+                        input[:, -1, 3:] = y[:, -1, 2:]
+                    y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
+                    # Perform the rescaling using broadcasting
+                    with h5py.File(file_path, "r") as file:
+                        data_scaled = file[dataset_name]
+                        mins, maxs = (
+                            data_scaled.attrs["min_values"],
+                            data_scaled.attrs["max_values"],
+                        )
+                    maxs_expanded = torch.tensor(
+                        maxs[np.newaxis, np.newaxis, :], device=X.device
                     )
-                maxs_expanded = torch.tensor(
-                    maxs[np.newaxis, np.newaxis, :], device=X.device
-                )
-                mins_expanded = torch.tensor(
-                    mins[np.newaxis, np.newaxis, :], device=X.device
-                )
-                # X = X * (maxs_expanded - mins_expanded) + mins_expanded
-                Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
-                y_hat = (
-                    y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
+                    mins_expanded = torch.tensor(
+                        mins[np.newaxis, np.newaxis, :], device=X.device
+                    )
+                    # X = X * (maxs_expanded - mins_expanded) + mins_expanded
+                    Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
+                    y_hat = (
+                        y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
                         + mins_expanded[:, :, 1:]
-                )
+                    )
                 losses[k] = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
+                if k == 1:
+                    break
+            else:
+                with ctx:
+                    _, loss = model(X, Y)
+                losses[k] = loss.item()
         out[split] = losses.mean().to("cpu").item()
     model.train()
     return out
 
 
-
-
-# learning rate decay scheduler (warmup, linear decay, cool down to 0)
 class LRScheduler:
     def __init__(
-        self, learning_rate, warmup_iters, max_iters, min_lr, lr_decay_iter
+        self, initial_lr, warmup_lr, warmup_iters, max_iters, min_lr, decay_iters
     ):
-        self.learning_rate = learning_rate
+        """
+        Initialize the learning rate scheduler.
+
+        Args:
+            initial_lr (float): The initial learning rate for the first warm-up phase.
+            warmup_lr (float): The target learning rate for subsequent warm-up phases.
+            warmup_iters (int): The number of iterations to warm up.
+            max_iters (int): The number of iterations for one warmup-decay cycle.
+            min_lr (float): The minimum learning rate.
+            decay_iters (int): The number of iterations over which to decay the learning rate.
+        """
+        self.initial_lr = initial_lr
+        self.warmup_lr = warmup_lr
         self.warmup_iters = warmup_iters
         self.max_iters = max_iters
         self.min_lr = min_lr
-        self.decay = True
+        self.decay_iters = decay_iters
+        self.cycle_iterations = max_iters
         self.lr_step = 0
-        self.lr_decay_iter = lr_decay_iter
+        self.current_cycle = 0
 
-    def get_lr(self, it, lr_prev):
-        if it < self.warmup_iters:
-            return self.learning_rate * it / self.warmup_iters
-        if it > (self.max_iters - self.warmup_iters):
-            if self.decay:
-                self.lr_step = lr_prev / self.warmup_iters
-                self.decay = False
-            lr_prev -= self.lr_step
-            return lr_prev
-        if lr_prev > self.min_lr:
-            self.lr_step = (self.learning_rate - self.min_lr) / (
-                self.lr_decay_iter - self.warmup_iters
-            )
-            lr_prev -= self.lr_step
-            return lr_prev
+    def get_lr(self, current_iter, lr_prev):
+        """
+        Compute the learning rate at the given iteration.
+
+        Args:
+            current_iter (int): The current iteration number.
+            lr_prev (float): The learning rate from the previous iteration.
+
+        Returns:
+            float: The computed learning rate.
+        """
+        # Total iterations passed in all cycles
+        total_iter = current_iter + (self.current_cycle * self.cycle_iterations)
+
+        # Find the effective iteration within the current cycle
+        effective_iter = total_iter % self.cycle_iterations
+
+        # Determine the correct target learning rate during warmup
+        target_lr = self.initial_lr if self.current_cycle == 0 else self.warmup_lr
+
+        # Phase 1: Warmup phase
+        if effective_iter < self.warmup_iters:
+            current_lr = target_lr * (effective_iter / self.warmup_iters)
+        # Phase 2: Decay phase
         else:
-            return lr_prev
+            decay_phase_iter = effective_iter - self.warmup_iters
+            total_decay_phase_iters = self.decay_iters - self.warmup_iters
+            if decay_phase_iter < total_decay_phase_iters:
+                decay_step = (target_lr - self.min_lr) / total_decay_phase_iters
+                current_lr = target_lr - decay_step * decay_phase_iter
+            else:
+                current_lr = self.min_lr
+
+        # Ensure learning rate does not drop below the minimum learning rate
+        current_lr = max(current_lr, self.min_lr)
+
+        # Check if this completes a cycle
+        if effective_iter + 1 == self.cycle_iterations:
+            self.current_cycle += 1
+
+        return current_lr
+
 
 lr_scheduler = LRScheduler(
-    learning_rate, warmup_iters, max_iters, min_lr, lr_decay_iters
+    initial_lr=learning_rate,
+    warmup_lr=learning_rate / 10,
+    warmup_iters=200,
+    max_iters=decay_iters,
+    min_lr=min_lr,
+    decay_iters=decay_iters,
 )
 
 
@@ -361,9 +418,9 @@ while True:
         print(
             f"EVAL: "
             f"step {iter_num}: train loss {losses['train']:.3e}, "
-            f"val loss {losses['val']:.3e}"
+            f"val loss {losses['val']:.3e}, "
+            f"pred loss {losses['pred']:.3e}, "
         )
-        # FIX: Track pred loss
         if losses["val"] < best_val_loss:
             best_val_loss = losses["val"]
             if iter_num > 0:
@@ -373,11 +430,11 @@ while True:
                     "model_args": model_args,
                     "iter_num": iter_num,
                     "best_val_loss": best_val_loss,
+                    "best_pred_loss": best_pred_loss,
                     "config": config,
                 }
-                print(f"saving checkpoint to {out_dir}")
+                print(f"saving val checkpoint to {out_dir}")
 
-        # FIX: save on pred loss
                 torch.save(
                     checkpoint,
                     os.path.join(
@@ -386,11 +443,32 @@ while True:
                     ),
                 )
 
+        if losses["pred"] < best_pred_loss:
+            best_pred_loss = losses["pred"]
+            if iter_num > 0:
+                checkpoint = {
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "model_args": model_args,
+                    "iter_num": iter_num,
+                    "best_val_loss": best_val_loss,
+                    "best_pred_loss": best_pred_loss,
+                    "config": config,
+                }
+                print(f"saving pred checkpoint to {out_dir}")
+
+                torch.save(
+                    checkpoint,
+                    os.path.join(
+                        out_dir,
+                        f"{checkpoint['best_pred_loss']:.1e}_pred_loss.pt",
+                    ),
+                )
     # forward backward update, with optional gradient accumulation to simulate larger
     # batch size and using the GradScaler if data type is float16
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
-            _, loss = model(X, Y[:,:,1:])
+            _, loss = model(X, Y[:, :, 1:])
             loss = (
                 loss / gradient_accumulation_steps
             )  # scale the loss to account for gradient accumulation
@@ -430,7 +508,7 @@ while True:
             f"lr {lr:.1e}, "
             f"mfu {running_mfu*100:.2f}%"
         )
-        # FIX: track pred loss
+
         if wandb_log:
             wandb.log(
                 {
@@ -438,6 +516,7 @@ while True:
                     "loss_train": lossf,
                     "val/loss_train": losses["train"],
                     "val/loss_eval": losses["val"],
+                    "val/loss_pred": losses["pred"],
                     "lr": lr,
                     "mfu": running_mfu * 100,  # convert to percentage
                     "norm": norm.item(),  # convert to percentage
