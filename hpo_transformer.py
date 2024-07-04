@@ -19,6 +19,7 @@ import torch.nn.functional as F
 from ConfigSpace import (
     Categorical,
     ConfigurationSpace,
+    EqualsCondition,
     Float,
     ForbiddenAndConjunction,
     ForbiddenEqualsClause,
@@ -148,7 +149,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                 y_hat = []
                 with ctx:
                     input = X[:, :seq_len]
-                    for i in range(4096):
+                    for i in range(6144):
                         y, _ = model(input)
                         y_hat.append(y)
                         input = torch.roll(input, -1, 1)
@@ -288,7 +289,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
             torch.cuda.empty_cache()
             break
         except RuntimeError as e:
-            if "out of memory" in str(e) and batch_size > 16:
+            if "out of memory" in str(e) and batch_size > 1:
                 del memory_allocated
                 del memory_reserved
                 del scaler, lr, micro_step
@@ -325,6 +326,8 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                 # torch._dynamo.reset()
                 torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.empty_cache()
+                print(config)
+                print(e)
                 print(
                     f"CUDA OOM, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
                 )
@@ -379,23 +382,23 @@ if __name__ == "__main__":
         name="transformer",
         seed=seed,
         space={
-            # "pe_type": Categorical("pe_type", ["RoPE", "ALiBi"]),
+            "pe_type": Categorical("pe_type", ["RoPE", "APE", "ALiBi"]),
             # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
             "rope_theta": Float(
-                "rope_theta", bounds=(500, 200_000), log=True, default=12_000
+                "rope_theta", bounds=(500, 200_000), log=True
             ),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
             # "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
-                "dim_model", [4, 6, 8, 16, 32, 64, 128, 256, 384], ordered=True
+                "dim_model", [64, 128, 256, 384, 512, 786], ordered=True
             ),
             "n_heads": Categorical(
                 "n_heads",
-                [2, 4, 8, 12, 16, 32, 64, 96],
+                [2, 4, 8, 12, 16, 32, 64],
                 ordered=True,
             ),
-            "seq_len": Categorical("seq_len", [768, 1024, 1536, 2048], ordered=True),
-            "n_layer": Integer("n_layer", bounds=(12, 40)),
+            "seq_len": Categorical("seq_len", [256, 512, 1024, 2048], ordered=True),
+            "n_layer": Integer("n_layer", bounds=(8, 25)),
             # "bias": Categorical("bias", [True, False], default=False),
             # "learning_rate": Float(
             #    "learning_rate",
@@ -407,7 +410,7 @@ if __name__ == "__main__":
         },
     )
 
-    # cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
+    cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
 
     # Function to find the forbidden heads for a given dim_model.
     def forbidden_heads_for_dim_model(dim_model, n_heads):
@@ -431,10 +434,10 @@ if __name__ == "__main__":
     # Scenario object specifying the optimization environment
     scenario = Scenario(
         configspace=cs,
-        name="transformer_2",
+        name="transformer_10",
         output_directory=Path(f"{Path.cwd()}/hpo"),
         deterministic=True,
-        n_trials=250,
+        n_trials=150,
         termination_cost_threshold=0.01,
         min_budget=20,
         max_budget=250,

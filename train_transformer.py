@@ -255,6 +255,7 @@ if compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 
+# FIX: add val and train loss
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
 def estimate_loss(file_path=data_file, dataset_name=dataset):
@@ -362,6 +363,7 @@ while True:
             f"step {iter_num}: train loss {losses['train']:.3e}, "
             f"val loss {losses['val']:.3e}"
         )
+        # FIX: Track pred loss
         if losses["val"] < best_val_loss:
             best_val_loss = losses["val"]
             if iter_num > 0:
@@ -375,6 +377,7 @@ while True:
                 }
                 print(f"saving checkpoint to {out_dir}")
 
+        # FIX: save on pred loss
                 torch.save(
                     checkpoint,
                     os.path.join(
@@ -387,7 +390,7 @@ while True:
     # batch size and using the GradScaler if data type is float16
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
-            _, loss = model(X, Y)
+            _, loss = model(X, Y[:,:,1:])
             loss = (
                 loss / gradient_accumulation_steps
             )  # scale the loss to account for gradient accumulation
@@ -427,6 +430,7 @@ while True:
             f"lr {lr:.1e}, "
             f"mfu {running_mfu*100:.2f}%"
         )
+        # FIX: track pred loss
         if wandb_log:
             wandb.log(
                 {
