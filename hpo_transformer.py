@@ -70,22 +70,24 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     n_layer = config["n_layer"]
     n_heads = config["n_heads"]
     dim_model = config["dim_model"]
+    pe_type = config["RoPE"]
+    rope_theta = config["rope_theta"]
+
     bias = False
     learning_rate = 2e-3
-    pe_type = "RoPE"
-    rope_theta = config["rope_theta"]
     loss_type = "MSE"
     norm_type = "RMSNorm"
     reduction = "mean"
     act_type = "SwiGLU"
     max_iters = np.floor(budget)
 
-    eval_interval = np.floor(max_iters / 4)
-    eval_iters = 1
+    eval_interval = 50
+    eval_iters = 25
     dataset = "spme_training_scaled"
     data_file = os.path.abspath("data/train/battery_data.h5")
 
     batch_size = divmod(524_288, seq_len)[0]
+    # Note more than 3000 based on dataloader and dataset size
     possible_sizes = [
         # 16,
         # 24,
@@ -99,18 +101,14 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
         384,
         512,
         768,
-        # 1024,
-        # 1536,
-        # 2048,
-        # 3072,
-        # 4096,
-        # 6144,
-        # 8192,
+        1024,
+        1536,
+        2048,
     ]
     batch_size = closest_size(batch_size, possible_sizes)
     gradient_accumulation_steps = 1
-    lr_decay_iter = 2060
-    min_lr = learning_rate / 10
+    lr_decay_iter = 3000
+    min_lr = 1e-7
     weight_decay = 1e-1
     beta1 = 0.9
     beta2 = 0.95
@@ -142,40 +140,48 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     def estimate_loss(file_path=data_file, dataset_name=dataset):
         out = {}
         model.eval()
-        for split in ["pred"]:
+        # for split in ["train", "val", "pred"]:
+        for split in ["val"]:
             losses = torch.zeros(eval_iters)
             for k in range(eval_iters):
                 X, Y = train_data.get_batch(split)
-                y_hat = []
-                with ctx:
-                    input = X[:, :seq_len]
-                    for i in range(6144):
-                        y, _ = model(input)
-                        y_hat.append(y)
-                        input = torch.roll(input, -1, 1)
-                        input[:, -1, :3] = X[:, seq_len + i, :3]
-                        input[:, -1, 3:] = y[:, -1, 2:]
-                    y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
-                    # Perform the rescaling using broadcasting
-                    with h5py.File(file_path, "r") as file:
-                        data_scaled = file[dataset_name]
-                        mins, maxs = (
-                            data_scaled.attrs["min_values"],
-                            data_scaled.attrs["max_values"],
+                if split == "pred":
+                    y_hat = []
+                    with ctx:
+                        input = X[:, :seq_len]
+                        for i in range(6144):
+                            y, _ = model(input)
+                            y_hat.append(y)
+                            input = torch.roll(input, -1, 1)
+                            input[:, -1, :3] = X[:, seq_len + i, :3]
+                            input[:, -1, 3:] = y[:, -1, 2:]
+                        y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
+                        # Perform the rescaling using broadcasting
+                        with h5py.File(file_path, "r") as file:
+                            data_scaled = file[dataset_name]
+                            mins, maxs = (
+                                data_scaled.attrs["min_values"],
+                                data_scaled.attrs["max_values"],
+                            )
+                        maxs_expanded = torch.tensor(
+                            maxs[np.newaxis, np.newaxis, :], device=X.device
                         )
-                    maxs_expanded = torch.tensor(
-                        maxs[np.newaxis, np.newaxis, :], device=X.device
-                    )
-                    mins_expanded = torch.tensor(
-                        mins[np.newaxis, np.newaxis, :], device=X.device
-                    )
-                    # X = X * (maxs_expanded - mins_expanded) + mins_expanded
-                    Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
-                    y_hat = (
-                        y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
-                        + mins_expanded[:, :, 1:]
-                    )
+                        mins_expanded = torch.tensor(
+                            mins[np.newaxis, np.newaxis, :], device=X.device
+                        )
+                        # X = X * (maxs_expanded - mins_expanded) + mins_expanded
+                        Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
+                        y_hat = (
+                            y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
+                            + mins_expanded[:, :, 1:]
+                        )
                     losses[k] = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
+                    if k == 1:
+                        break
+                else:
+                    with ctx:
+                        _, loss = model(X, Y[:, :, 1:])
+                    losses[k] = loss
             out[split] = losses.mean().to("cpu").item()
         model.train()
         return out
@@ -254,15 +260,15 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
 
             lr = learning_rate
             iter_num = 0
-            best_pred_loss = 1e9
+            best_val_loss = 1e9
             while True:
                 lr = lr_schedul.get_lr(iter_num, lr)
                 for param_group in optimizer.param_groups:
                     param_group["lr"] = lr
                 if (iter_num % eval_interval == 0) and (iter_num > 0):
                     losses = estimate_loss()
-                    if losses["pred"] < best_pred_loss:
-                        best_pred_loss = losses["pred"]
+                    if losses["val"] < best_val_loss:
+                        best_val_loss = losses["val"]
                 for micro_step in range(gradient_accumulation_steps):
                     with ctx:
                         _, loss = model(X, Y[:, :, 1:])
@@ -352,10 +358,10 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     torch.cuda.empty_cache()
 
     print(
-        f"Loss: {best_pred_loss:.2f}, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
+        f"Loss: {best_val_loss:.2f}, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
     )
 
-    return best_pred_loss
+    return best_val_loss
 
 
 if __name__ == "__main__":
@@ -384,15 +390,15 @@ if __name__ == "__main__":
         space={
             "pe_type": Categorical("pe_type", ["RoPE", "APE", "ALiBi"]),
             # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
-            "rope_theta": Float("rope_theta", bounds=(500, 200_000), log=True),
+            "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
             # "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
-                "dim_model", [64, 128, 256, 384, 512, 786], ordered=True
+                "dim_model", [64, 128, 256, 384, 512, 768], ordered=True
             ),
             "n_heads": Categorical(
                 "n_heads",
-                [2, 4, 8, 12, 16, 32, 64],
+                [2, 4, 8, 12, 16, 32, 64, 128, 256, 384, 512],
                 ordered=True,
             ),
             "seq_len": Categorical("seq_len", [256, 512, 1024, 2048], ordered=True),
@@ -429,7 +435,7 @@ if __name__ == "__main__":
 
     cs.add_forbidden_clauses(forbidden_clauses)
 
-    forbidden_dim_flash_attn = ForbiddenEqualsClause(cs["dim_model"], 786)
+    forbidden_dim_flash_attn = ForbiddenEqualsClause(cs["dim_model"], 768)
     forbidden_head_flash_attn = ForbiddenEqualsClause(cs["n_heads"], 2)
     forbidden_flash_attn = ForbiddenAndConjunction(
         forbidden_dim_flash_attn, forbidden_head_flash_attn
@@ -439,13 +445,13 @@ if __name__ == "__main__":
     # Scenario object specifying the optimization environment
     scenario = Scenario(
         configspace=cs,
-        name="transformer_10",
+        name="transformer_20",
         output_directory=Path(f"{Path.cwd()}/hpo"),
         deterministic=True,
         n_trials=150,
         termination_cost_threshold=0.01,
-        min_budget=20,
-        max_budget=250,
+        min_budget=50,
+        max_budget=500,
         n_workers=4,
     )
 

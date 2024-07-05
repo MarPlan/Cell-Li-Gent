@@ -310,8 +310,8 @@ def estimate_loss(file_path=data_file, dataset_name=dataset):
                     break
             else:
                 with ctx:
-                    _, loss = model(X, Y)
-                losses[k] = loss.item()
+                    _, loss = model(X, Y[:,:,1:])
+                losses[k] = loss
         out[split] = losses.mean().to("cpu").item()
     model.train()
     return out
