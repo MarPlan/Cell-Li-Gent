@@ -85,7 +85,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
         384,
         512,
         768,
-        # 1024,
+        1024,
         # 1536,
         # 2048,
         # 3072,
@@ -285,6 +285,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                 torch.cuda.empty_cache()
                 batch_size //= 2
                 gradient_accumulation_steps *= 2
+                print(f"{device} reduced batch size to {batch_size}")
             else:
                 while True:
                     try:

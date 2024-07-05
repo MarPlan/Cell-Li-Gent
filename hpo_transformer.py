@@ -70,8 +70,8 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     n_layer = config["n_layer"]
     n_heads = config["n_heads"]
     dim_model = config["dim_model"]
-    pe_type = config["RoPE"]
-    rope_theta = config["rope_theta"]
+    pe_type = config["pe_type"]
+    rope_theta = config["rope_theta"] if pe_type == "RoPE" else 666
 
     bias = False
     learning_rate = 2e-3
@@ -141,7 +141,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
         out = {}
         model.eval()
         # for split in ["train", "val", "pred"]:
-        for split in ["val"]:
+        for split in ["pred"]:
             losses = torch.zeros(eval_iters)
             for k in range(eval_iters):
                 X, Y = train_data.get_batch(split)
@@ -157,24 +157,24 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                             input[:, -1, 3:] = y[:, -1, 2:]
                         y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                         # Perform the rescaling using broadcasting
-                        with h5py.File(file_path, "r") as file:
-                            data_scaled = file[dataset_name]
-                            mins, maxs = (
-                                data_scaled.attrs["min_values"],
-                                data_scaled.attrs["max_values"],
-                            )
-                        maxs_expanded = torch.tensor(
-                            maxs[np.newaxis, np.newaxis, :], device=X.device
-                        )
-                        mins_expanded = torch.tensor(
-                            mins[np.newaxis, np.newaxis, :], device=X.device
-                        )
-                        # X = X * (maxs_expanded - mins_expanded) + mins_expanded
-                        Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
-                        y_hat = (
-                            y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
-                            + mins_expanded[:, :, 1:]
-                        )
+                        # with h5py.File(file_path, "r") as file:
+                        #     data_scaled = file[dataset_name]
+                        #     mins, maxs = (
+                        #         data_scaled.attrs["min_values"],
+                        #         data_scaled.attrs["max_values"],
+                        #     )
+                        # maxs_expanded = torch.tensor(
+                        #     maxs[np.newaxis, np.newaxis, :], device=X.device
+                        # )
+                        # mins_expanded = torch.tensor(
+                        #     mins[np.newaxis, np.newaxis, :], device=X.device
+                        # )
+                        # # X = X * (maxs_expanded - mins_expanded) + mins_expanded
+                        # Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
+                        # y_hat = (
+                        #     y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
+                        #     + mins_expanded[:, :, 1:]
+                        # )
                     losses[k] = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
                     if k == 1:
                         break
@@ -260,15 +260,15 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
 
             lr = learning_rate
             iter_num = 0
-            best_val_loss = 1e9
+            best_pred_loss = 1e9
             while True:
                 lr = lr_schedul.get_lr(iter_num, lr)
                 for param_group in optimizer.param_groups:
                     param_group["lr"] = lr
                 if (iter_num % eval_interval == 0) and (iter_num > 0):
                     losses = estimate_loss()
-                    if losses["val"] < best_val_loss:
-                        best_val_loss = losses["val"]
+                    if losses["pred"] < best_pred_loss:
+                        best_pred_loss = losses["pred"]
                 for micro_step in range(gradient_accumulation_steps):
                     with ctx:
                         _, loss = model(X, Y[:, :, 1:])
@@ -313,6 +313,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                 torch.cuda.empty_cache()
                 batch_size //= 2
                 gradient_accumulation_steps *= 2
+                print(f"{device} reduced batch size to {batch_size}")
             else:
                 while True:
                     try:
@@ -358,10 +359,10 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
     torch.cuda.empty_cache()
 
     print(
-        f"Loss: {best_val_loss:.2f}, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
+        f"Loss: {best_pred_loss:.2f}, device: {device},  mem_alloc: {memory_allocated / (1024 ** 2):.2f} MB, mem_res: {memory_reserved / (1024 ** 2):.2f} MB"
     )
 
-    return best_val_loss
+    return best_pred_loss
 
 
 if __name__ == "__main__":
@@ -449,9 +450,9 @@ if __name__ == "__main__":
         output_directory=Path(f"{Path.cwd()}/hpo"),
         deterministic=True,
         n_trials=150,
-        termination_cost_threshold=0.01,
+        # termination_cost_threshold=0.01,
         min_budget=50,
-        max_budget=500,
+        max_budget=250,
         n_workers=4,
     )
 

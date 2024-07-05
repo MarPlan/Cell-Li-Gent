@@ -32,15 +32,15 @@ def plot_hpo_partial(save=False):
         space={
             "pe_type": Categorical("pe_type", ["RoPE", "APE", "ALiBi"]),
             # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
-            "rope_theta": Float("rope_theta", bounds=(500, 200_000), log=True),
+            "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
             # "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
-                "dim_model", [64, 128, 256, 384, 512, 786], ordered=True
+                "dim_model", [64, 128, 256, 384, 512, 768], ordered=True
             ),
             "n_heads": Categorical(
                 "n_heads",
-                [2, 4, 8, 12, 16, 32, 64],
+                [2, 4, 8, 12, 16, 32, 64, 128, 256, 384, 512],
                 ordered=True,
             ),
             "seq_len": Categorical("seq_len", [256, 512, 1024, 2048], ordered=True),
@@ -55,13 +55,13 @@ def plot_hpo_partial(save=False):
             # ),
         },
     )
-
+ 
     cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
-
+ 
     # Function to find the forbidden heads for a given dim_model.
     def forbidden_heads_for_dim_model(dim_model, n_heads):
         return [head for head in n_heads if head >= dim_model or dim_model % head != 0]
-
+ 
     # Creating all forbidden clauses.
     forbidden_clauses = []
     for dim_model in cs["dim_model"].sequence:
@@ -74,10 +74,10 @@ def plot_hpo_partial(save=False):
             forbidden_clauses.append(
                 ForbiddenAndConjunction(forbidden_dim_clause, forbidden_heads_clause)
             )
-
+ 
     cs.add_forbidden_clauses(forbidden_clauses)
-
-    forbidden_dim_flash_attn = ForbiddenEqualsClause(cs["dim_model"], 786)
+ 
+    forbidden_dim_flash_attn = ForbiddenEqualsClause(cs["dim_model"], 768)
     forbidden_head_flash_attn = ForbiddenEqualsClause(cs["n_heads"], 2)
     forbidden_flash_attn = ForbiddenAndConjunction(
         forbidden_dim_flash_attn, forbidden_head_flash_attn
@@ -88,7 +88,7 @@ def plot_hpo_partial(save=False):
     runhistory = RunHistory()
 
     # Load the run history from a JSON file
-    runhistory.load("hpo/transformer_10/0/runhistory.json", cs)
+    runhistory.load("hpo/transformer_20_val2/0/runhistory.json", cs)
 
     # Extract the configuration IDs and corresponding costs
     extracted_data = {"config_id": [], "cost": [], "starttime": [], "endtime": []}
