@@ -21,10 +21,11 @@ from ConfigSpace import (
     ConfigurationSpace,
     Integer,
 )
-from model.mamba import MambaLMHeadModel, ModelArgs
 from smac import Callback, Scenario
 from smac import MultiFidelityFacade as MFFacade
 from smac.intensifier.hyperband import Hyperband
+
+from model.mamba import MambaLMHeadModel, ModelArgs
 from util.prepare_data import BatteryData
 
 
@@ -135,7 +136,7 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                 y_hat = []
                 with ctx:
                     input = X[:, :seq_len]
-                    for i in range(4096):
+                    for i in range(6144):
                         y, _ = model(input)
                         y_hat.append(y)
                         input = torch.roll(input, -1, 1)
@@ -143,25 +144,25 @@ def train(config: ConfigurationSpace, seed: int = 420, budget=55):
                         input[:, -1, 3:] = y[:, -1, 2:]
                     y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                     # Perform the rescaling using broadcasting
-                    with h5py.File(file_path, "r") as file:
-                        data_scaled = file[dataset_name]
-                        mins, maxs = (
-                            data_scaled.attrs["min_values"],
-                            data_scaled.attrs["max_values"],
-                        )
-                    maxs_expanded = torch.tensor(
-                        maxs[np.newaxis, np.newaxis, :], device=X.device
-                    )
-                    mins_expanded = torch.tensor(
-                        mins[np.newaxis, np.newaxis, :], device=X.device
-                    )
-                    # X = X * (maxs_expanded - mins_expanded) + mins_expanded
-                    Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
-                    y_hat = (
-                        y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
-                        + mins_expanded[:, :, 1:]
-                    )
-                    losses[k] = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
+                    # with h5py.File(file_path, "r") as file:
+                    #     data_scaled = file[dataset_name]
+                    #     mins, maxs = (
+                    #         data_scaled.attrs["min_values"],
+                    #         data_scaled.attrs["max_values"],
+                    #     )
+                    # maxs_expanded = torch.tensor(
+                    #     maxs[np.newaxis, np.newaxis, :], device=X.device
+                    # )
+                    # mins_expanded = torch.tensor(
+                    #     mins[np.newaxis, np.newaxis, :], device=X.device
+                    # )
+                    # # X = X * (maxs_expanded - mins_expanded) + mins_expanded
+                    # Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
+                    # y_hat = (
+                    #     y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
+                    #     + mins_expanded[:, :, 1:]
+                    # )
+                losses[k] = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
             out[split] = losses.mean().to("cpu").item()
         model.train()
         return out

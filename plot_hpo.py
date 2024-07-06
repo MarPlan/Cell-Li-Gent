@@ -88,12 +88,13 @@ def plot_hpo_partial(save=False):
     runhistory = RunHistory()
 
     # Load the run history from a JSON file
-    runhistory.load("hpo/transformer_20_val2/0/runhistory.json", cs)
+    runhistory.load("hpo/transformer_30_6144_pred_loss_scaled_optim/0/runhistory.json", cs)
 
     # Extract the configuration IDs and corresponding costs
-    extracted_data = {"config_id": [], "cost": [], "starttime": [], "endtime": []}
+    extracted_data = {"budget": [], "config_id": [], "cost": [], "starttime": [], "endtime": []}
 
     for trial_key, trial_value in runhistory._data.items():
+        extracted_data["budget"].append(trial_key.budget)
         extracted_data["config_id"].append(trial_key.config_id)
         extracted_data["cost"].append(trial_value.cost)
         extracted_data["starttime"].append(trial_value.starttime)
@@ -133,8 +134,12 @@ def plot_hpo_partial(save=False):
 
     # Assume `hyperparameters` is a list of configurations and `costs` is a list of corresponding costs
     hyperparameters = np.array(hyperparameters).astype(np.float64)
+    hyperparameters= np.concatenate((hyperparameters, np.array(extracted_data["budget"]).reshape(-1, 1)), axis=1)
+    hypparam_names.append("budget")
+
     costs = np.array(extracted_data["cost"]).astype(np.float64)
     mask = costs != 1e7
+    # mask = (costs != 1e7) & (np.array(extracted_data["budget"]) > 200)
     costs = costs[mask]
     hyperparameters = hyperparameters[mask]
 

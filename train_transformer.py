@@ -105,13 +105,13 @@ batch_size = (
     256 // gradient_accumulation_steps
 )  # 524_288 if gradient_accumulation_steps > 1, this is the micro-batch size
 
-rope_theta = 7295
-pe_type = "RoPE"
+pe_type = "ALiBi"
+rope_theta = 666
 seq_len = 2048
 # model
-n_layer = 19
-n_heads = 64
-dim_model = 128
+n_layer = 16
+n_heads = 16
+dim_model = 512
 learning_rate = 2e-3  # max learning rate
 min_lr = 1e-7  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 warmup_iters = 200  # how many steps to warm up for
@@ -287,24 +287,24 @@ def estimate_loss(file_path=data_file, dataset_name=dataset):
                         input[:, -1, 3:] = y[:, -1, 2:]
                     y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                     # Perform the rescaling using broadcasting
-                    with h5py.File(file_path, "r") as file:
-                        data_scaled = file[dataset_name]
-                        mins, maxs = (
-                            data_scaled.attrs["min_values"],
-                            data_scaled.attrs["max_values"],
-                        )
-                    maxs_expanded = torch.tensor(
-                        maxs[np.newaxis, np.newaxis, :], device=X.device
-                    )
-                    mins_expanded = torch.tensor(
-                        mins[np.newaxis, np.newaxis, :], device=X.device
-                    )
-                    # X = X * (maxs_expanded - mins_expanded) + mins_expanded
-                    Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
-                    y_hat = (
-                        y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
-                        + mins_expanded[:, :, 1:]
-                    )
+                    # with h5py.File(file_path, "r") as file:
+                    #     data_scaled = file[dataset_name]
+                    #     mins, maxs = (
+                    #         data_scaled.attrs["min_values"],
+                    #         data_scaled.attrs["max_values"],
+                    #     )
+                    # maxs_expanded = torch.tensor(
+                    #     maxs[np.newaxis, np.newaxis, :], device=X.device
+                    # )
+                    # mins_expanded = torch.tensor(
+                    #     mins[np.newaxis, np.newaxis, :], device=X.device
+                    # )
+                    # # X = X * (maxs_expanded - mins_expanded) + mins_expanded
+                    # Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
+                    # y_hat = (
+                    #     y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
+                    #     + mins_expanded[:, :, 1:]
+                    # )
                 losses[k] = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
                 if k == 1:
                     break
