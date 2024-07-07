@@ -12,6 +12,7 @@ class BatteryData:
         self.batch_size = batch_size
         self.sub_seq_len = seq_len
         self.device = device
+        self.first = True
 
         self.n_series = self.file[dataset].shape[0]
         self.total_seq_len = self.file[dataset].shape[1]
@@ -39,13 +40,15 @@ class BatteryData:
         if split == "pred":
             # Using validation data
             # pred_horizon = 6  # factor for seq_len prediction horizon
-            # seq_indices = np.random.randint( np.ceil(self.n_series * 0.8) - 1, self.n_series, self.batch_size)
-            # start_indices = np.random.randint(
-            #     0, self.total_seq_len - pred_horizon * self.sub_seq_len, self.batch_size
-            # )
             pred_horizon = 4 * 2048
-            seq_indices = np.array([2900, 2901, 2902, 2903, 2904, 2905])
-            start_indices = np.array([2_000] * 6)
+            seq_indices = np.random.randint(
+                np.ceil(self.n_series * 0.8) - 1, self.n_series, 16
+            )
+            start_indices = np.random.randint(0, self.total_seq_len - pred_horizon, 16)
+            if self.first:
+                seq_indices[0:4] = np.array([2900, 2901, 2902, 2903])
+                start_indices[0:4] = np.array([2_000] * 4)
+                self.first = False
 
         with h5py.File(self.file_path, "r") as file:
             data = file[self.dataset]  # Access the specified dataset

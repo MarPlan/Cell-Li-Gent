@@ -34,7 +34,7 @@ def plot_hpo_partial(save=False):
             # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
             "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
-            # "reduction": Categorical("reduction", ["sum", "mean"]),
+            "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
                 "dim_model", [64, 128, 256, 384, 512, 768], ordered=True
             ),
@@ -88,7 +88,7 @@ def plot_hpo_partial(save=False):
     runhistory = RunHistory()
 
     # Load the run history from a JSON file
-    runhistory.load("hpo/transformer_30_6144_pred_loss_scaled_optim/0/runhistory.json", cs)
+    runhistory.load("hpo/transformer_30/0/runhistory.json", cs)
 
     # Extract the configuration IDs and corresponding costs
     extracted_data = {"budget": [], "config_id": [], "cost": [], "starttime": [], "endtime": []}
@@ -112,7 +112,7 @@ def plot_hpo_partial(save=False):
     # loss_function_map = {"MAE": 0, "MSE": 1}
     # normalization_map = {"RMSNorm": 0, "LayerNorm": 1}
     positional_encoding_map = {"ALiBi": 0,"RoPE": 1, "APE":2}
-    # reduction_map = {"sum": 0, "mean": 1}
+    reduction_map = {"sum": 0, "mean": 1}
 
     # Encode the data
     for item in hyperparameters:
@@ -120,7 +120,7 @@ def plot_hpo_partial(save=False):
     # item['loss'] = loss_function_map[item['loss']]
     # item['norm_type'] = normalization_map[item['norm_type']]
         item['pe_type'] = positional_encoding_map[item['pe_type']]
-    # item['reduction'] = reduction_map[item['reduction']]
+        item['reduction'] = reduction_map[item['reduction']]
 
     # Convert the hyperparameters to a format suitable for the Result object
     hypparam_names = list(cs.keys())

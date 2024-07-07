@@ -305,7 +305,7 @@ def estimate_loss(file_path=data_file, dataset_name=dataset):
                     #     y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
                     #     + mins_expanded[:, :, 1:]
                     # )
-                losses[k] = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
+                losses = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
                 if k == 1:
                     break
             else:
