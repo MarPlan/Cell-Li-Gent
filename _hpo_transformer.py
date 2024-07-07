@@ -72,7 +72,7 @@ def train(
     learning_rate = 2e-3
     loss_type = "MSE"
     norm_type = "RMSNorm"
-    reduction = config["reduction"]
+    reduction = "mean"
     act_type = "SwiGLU"
     max_iters = np.floor(budget)
 
@@ -336,7 +336,6 @@ def train(
                 # If file is already open, wait for 0.3 seconds and try again
                 time.sleep(0.1)
 
-        del X, Y, model, optimizer, scaler, train_data, model_args, param_group
         torch.cuda.synchronize(device)
         # gc.collect()
         # torch.cuda.empty_cache()

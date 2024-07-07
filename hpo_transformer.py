@@ -50,17 +50,17 @@ if __name__ == "__main__":
         name="transformer",
         seed=seed,
         space={
-            "pe_type": Categorical("pe_type", ["RoPE", "APE", "ALiBi"]),
+            "pe_type": Categorical("pe_type", ["APE", "ALiBi"]),
             # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
-            "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
+            # "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
-            "reduction": Categorical("reduction", ["sum", "mean"]),
+            # "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
                 "dim_model", [64, 128, 256, 384, 512, 768], ordered=True
             ),
             "n_heads": Categorical(
                 "n_heads",
-                [2, 4, 8, 12, 16, 32, 64, 128, 256, 384, 512],
+                [2, 4, 8, 12, 16, 32, 64],
                 ordered=True,
             ),
             "seq_len": Categorical("seq_len", [256, 512, 1024, 2048], ordered=True),
@@ -76,7 +76,7 @@ if __name__ == "__main__":
         },
     )
 
-    cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
+    # cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
 
     # Function to find the forbidden heads for a given dim_model.
     def forbidden_heads_for_dim_model(dim_model, n_heads):
@@ -112,8 +112,8 @@ if __name__ == "__main__":
         deterministic=True,
         n_trials=200,
         # termination_cost_threshold=0.01,
-        min_budget=333,
-        max_budget=999,
+        min_budget=100,
+        max_budget=1000,
         n_workers=4,
     )
 

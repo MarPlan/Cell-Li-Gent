@@ -62,6 +62,12 @@ def train(
 
     # TODO: Add slice for Y to select out dim
     # slice = slice(:,:,1:)
+
+    # Extract the device number from the string
+    device_number = int(device.split(':')[1])
+    # Set the current CUDA device
+    torch.cuda.set_device(device_number)
+
     seq_len = config["seq_len"]
     n_layer = config["n_layer"]
     dim_model = config["dim_model"]
@@ -243,7 +249,6 @@ def train(
         optimizer = model.configure_optimizers(
             weight_decay, learning_rate, (beta1, beta2), device_type
         )
-        model = torch.compile(model)
         model.train()
         X, Y = train_data.get_batch("train")
 
@@ -326,7 +331,6 @@ def train(
                 # If file is already open, wait for 0.3 seconds and try again
                 time.sleep(0.1)
 
-        del X, Y, model, optimizer, scaler, train_data, model_args, param_group
         torch.cuda.synchronize(device)
         # gc.collect()
         # torch.cuda.empty_cache()

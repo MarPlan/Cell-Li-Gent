@@ -24,9 +24,9 @@ from _hpo_mamba import dask_wrapper
 if __name__ == "__main__":
     gpu_list = [
         "cuda:0",
-        "cuda:1",
-        "cuda:2",
-        "cuda:3",
+        # "cuda:1",
+        # "cuda:2",
+        # "cuda:3",
         # "cuda:4",
         # "cuda:5",
         # "cuda:6",
@@ -64,7 +64,7 @@ if __name__ == "__main__":
         # termination_cost_threshold=0.01,
         min_budget=333,
         max_budget=999,
-        n_workers=4,
+        n_workers=1,
     )
 
     # We want to run five random configurations before starting the optimization.
