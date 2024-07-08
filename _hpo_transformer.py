@@ -187,6 +187,10 @@ def train(
         fig = plt.figure()
         ax = fig.subplots(5, 1, sharex=True)
 
+        X = X[:, seq_len:].to(torch.float32).cpu().numpy()
+        Y = Y[:, seq_len:].to(torch.float32).cpu().numpy()
+        y_hat_re = y_hat_re.to(torch.float32).cpu().numpy()
+
         batch_nr = 0
         for i in range(X.shape[-1]):
             ax[0].plot(X[batch_nr, :, i], label="X")
@@ -211,7 +215,7 @@ def train(
 
         plt.tight_layout()
 
-        out_path = f"hpo/loss_re_{out["loss_re"]}_time_{time.time()}.png"
+        out_path = f"hpo/loss_re_{out["pred_re"]}_time_{time.time()}.png"
         fig.savefig(out_path, dpi=300)
         model.train()
         return out
@@ -321,7 +325,7 @@ def train(
             weight_decay, learning_rate, (beta1, beta2), device_type
         )
         model.train()
-        X, Y = train_data.get_batch(["train"])
+        X, Y = train_data.get_batch("train")
         lr = learning_rate
         iter_num = 0
         best_pred_loss = 1e9
