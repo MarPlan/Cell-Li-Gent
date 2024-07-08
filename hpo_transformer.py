@@ -51,7 +51,7 @@ if __name__ == "__main__":
         seed=seed,
         space={
             "pe_type": Categorical("pe_type", ["APE", "RoPE", "ALiBi"]),
-            # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
+            "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
             "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
             # "reduction": Categorical("reduction", ["sum", "mean"]),
@@ -63,7 +63,7 @@ if __name__ == "__main__":
                 [2, 4, 8, 12, 16, 32, 64],
                 ordered=True,
             ),
-            "seq_len": Categorical("seq_len", [256, 512, 1024], ordered=True),
+            "seq_len": Categorical("seq_len", [128, 256, 512, 768, 1024, 1536], ordered=True),
             "n_layer": Integer("n_layer", bounds=(8, 25)),
             # "bias": Categorical("bias", [True, False], default=False),
             # "learning_rate": Float(
@@ -107,13 +107,13 @@ if __name__ == "__main__":
     # Scenario object specifying the optimization environment
     scenario = Scenario(
         configspace=cs,
-        name="transformer_30",
+        name="transformer_final",
         output_directory=Path(f"{Path.cwd()}/hpo"),
         deterministic=True,
-        n_trials=75,
+        n_trials=500,
         # termination_cost_threshold=0.01,
-        min_budget=75,
-        max_budget=675,
+        min_budget=120,
+        max_budget=3240,
         n_workers=4,
     )
 
@@ -128,8 +128,6 @@ if __name__ == "__main__":
             pass
 
         def on_iteration_start(self, smbo) -> None:
-            # torch._dynamo.reset()
-            # torch._C._cuda_clearCublasWorkspaces()
             gc.collect()
             torch.cuda.empty_cache()
             return None

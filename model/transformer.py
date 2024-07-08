@@ -336,7 +336,10 @@ class Transformer(nn.Module):
             # if we are given some desired targets also calculate the loss
             if self.training:
                 if self.loss == "MSE":
-                    loss = F.mse_loss(out, y, reduction=self.reduction)
+                    # loss = F.mse_loss(out, y, reduction=self.reduction)
+                    loss = torch.sum(
+                        torch.mean(F.mse_loss(out, y, reduction="none"), dim=(0, 1))
+                    )
                 if self.loss == "MAE":
                     loss = F.smooth_l1_loss(out, y, reduction=self.reduction)
                 if self.loss == "LogCosh":

@@ -42,9 +42,9 @@ class BatteryData:
             # pred_horizon = 6  # factor for seq_len prediction horizon
             pred_horizon = 4 * 2048 + 1
             seq_indices = np.random.randint(
-                np.ceil(self.n_series * 0.8) - 1, self.n_series, 16
+                np.ceil(self.n_series * 0.8) - 1, self.n_series, 32
             )
-            start_indices = np.random.randint(0, self.total_seq_len - pred_horizon, 16)
+            start_indices = np.random.randint(0, self.total_seq_len - pred_horizon, 32)
             if self.first:
                 seq_indices[0:4] = np.array([2900, 2901, 2902, 2903])
                 start_indices[0:4] = np.array([2_000] * 4)

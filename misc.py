@@ -72,6 +72,7 @@ class LRScheduler:
 
         return current_lr
 
+
 def estimate_loss(file_path, dataset_name):
     # for split in ["train", "val", "pred"]:
     device = "cpu"
@@ -103,24 +104,24 @@ def estimate_loss(file_path, dataset_name):
                 t =9
 
 if __name__ == "__main__":
-    import os
-
-    import h5py
-    import torch
-
-    from util.prepare_data import BatteryData
-    dataset = "spme_training_scaled"
-    data_file = os.path.abspath("data/train/battery_data.h5")
-    estimate_loss(data_file, dataset)
+    # import os
+    #
+    # import h5py
+    # import torch
+    #
+    # from util.prepare_data import BatteryData
+    # dataset = "spme_training_scaled"
+    # data_file = os.path.abspath("data/train/battery_data.h5")
+    # estimate_loss(data_file, dataset)
 
 
 
     scheduler = LRScheduler(
         initial_lr=3e-3,
-        warmup_lr=3e-4,
+        warmup_lr=3e-3,
         warmup_iters=200,
-        max_iters=5000,
-        min_lr=1e-7,
+        max_iters=2000,
+        min_lr=1e-9,
         decay_iters=2000,
     )
     lrs = []

@@ -12,6 +12,7 @@ import time
 from contextlib import nullcontext
 
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -101,9 +102,9 @@ data_file = os.path.abspath("data/train/battery_data.h5")
 pe_type = "APE"
 rope_theta = 666
 seq_len = 512
-n_layer = 10
+n_layer = 12
 n_heads = 8
-dim_model = 386
+dim_model = 256
 
 gradient_accumulation_steps = 1  # used to simulate larger batch sizes
 batch_size = (
@@ -117,7 +118,7 @@ max_iters = (
 )  # total number of training iterations
 
 learning_rate = 2e-3  # max learning rate
-min_lr = 0  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+min_lr = 1e-9  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 warmup_iters = 200  # how many steps to warm up for
 decay_iters = np.floor(
     3_000 * 0.8 * 360_000 / seq_len / gradient_accumulation_steps / batch_size
@@ -265,11 +266,48 @@ if compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 
+def check_in_out(
+    x, y, y_hat, y_hat_pseudo, file_path=None, dataset_name=None, ckpt_path=None
+):
+    fig = plt.figure(dpi=300)
+    ax = fig.subplots(5, 1, sharex=True)
+
+    batch_nr = 0
+    for i in range(x.shape[-1]):
+        ax[0].plot(x[batch_nr, :, i], label="X")
+
+    for i in [1, 5]:
+        ax[1].plot(y[batch_nr, :, i], label="Y")
+        ax[1].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
+        ax[1].plot(y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
+
+    for i in [2, 4]:
+        ax[2].plot(y[batch_nr, :, i], label="Y")
+        ax[2].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
+        ax[2].plot(y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
+
+    for i in [3]:
+        ax[3].plot(y[batch_nr, :, i], label="Y")
+        ax[3].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
+        ax[3].plot(y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
+
+    for i in [0]:
+        ax[4].plot(y[batch_nr, :, i], label="Y")
+        ax[4].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
+        ax[4].plot(y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
+
+    plt.tight_layout()
+    # plt.show()
+    fig.savefig(ckpt_path.replace(".pt", ".png"), dpi=300)
+    # plt.show()
+
+
 @torch.no_grad()
-def estimate_loss(file_path=data_file, dataset_name=dataset):
+def estimate_loss(file_path=data_file, dataset_name=dataset, splits=[]):
     out = {}
     model.eval()
-    for split in ["train", "val", "pred"]:
+    # for split in ["train", "val", "pred"]:
+    for split in splits:
         losses = torch.zeros(eval_iters)
         train_data.first = True
         for k in range(eval_iters):
@@ -298,20 +336,34 @@ def estimate_loss(file_path=data_file, dataset_name=dataset):
                     mins_expanded = torch.tensor(
                         mins[np.newaxis, np.newaxis, :], device=X.device
                     )
-                    # X = X * (maxs_expanded - mins_expanded) + mins_expanded
+                    X = X * (maxs_expanded - mins_expanded) + mins_expanded
                     Y_re = Y * (maxs_expanded - mins_expanded) + mins_expanded
                     y_hat_re = y_hat * (maxs_expanded - mins_expanded) + mins_expanded
                 losses_re = F.mse_loss(Y_re[:, -4096:, :], y_hat_re[:, -4096:, :])
                 losses = F.mse_loss(Y[:, -4096:, :], y_hat[:, -4096:, :])
+                print(
+                    f"loss {losses.mean().to(torch.float32).to('cpu').item()}, lossre {losses_re.mean().to(torch.float32).to('cpu').item()}"
+                )
                 if k == 1:
                     break
             else:
                 with ctx:
-                    _, loss = model(X, Y[:, :, 1:])
+                    _, loss = model(X, Y)
                 losses[k] = loss
         out[split] = losses.mean().to("cpu").item()
         if split == "pred":
             out[split + "_re"] = losses_re.mean().to("cpu").item()
+
+            check_in_out(
+                X[:, seq_len:].to(torch.float32).cpu().numpy(),
+                Y[:, seq_len:].to(torch.float32).cpu().numpy(),
+                y_hat_re.to(torch.float32).cpu().numpy(),
+                y_hat_re.to(torch.float32).cpu().numpy(),
+                # y_hat_pseudo.to(torch.float32).cpu().numpy(),
+                file_path=data_file,
+                dataset_name=dataset,
+                ckpt_path="ckpt/transformer/v_1/pic.pt",
+            )
     model.train()
     return out
 
@@ -412,14 +464,16 @@ while True:
         param_group["lr"] = lr
 
     # evaluate the loss on train/val sets and write checkpoints
-    if iter_num % eval_interval == 0:
-        losses = estimate_loss()
+    if iter_num % np.floor(decay_iters / 5) == 0:
+        losses = estimate_loss(splits=["train", "val"])
+        train_loss_eval = losses["train"]
+        val_loss_eval = losses["val"]
         print(
             f"EVAL: "
             f"step {iter_num}: train loss {losses['train']:.3e}, "
             f"val loss {losses['val']:.3e}, "
-            f"pred loss {losses['pred']:.3e}, "
-            f"pred loss re {losses['pred_re']:.3e}, "
+            # f"pred loss {losses['pred']:.3e}, "
+            # f"pred loss re {losses['pred_re']:.3e}, "
         )
         if losses["val"] < best_val_loss:
             best_val_loss = losses["val"]
@@ -430,8 +484,8 @@ while True:
                     "model_args": model_args,
                     "iter_num": iter_num,
                     "best_val_loss": best_val_loss,
-                    "best_pred_loss": best_pred_loss,
-                    "best_pred_loss_re": losses["pred_re"],
+                    # "best_pred_loss": best_pred_loss,
+                    # "best_pred_loss_re": losses["pred_re"],
                     "config": config,
                 }
                 print(f"saving val checkpoint to {out_dir}")
@@ -444,6 +498,17 @@ while True:
                     ),
                 )
 
+    if iter_num % np.floor((decay_iters)) == 0:
+        losses = estimate_loss(splits=["pred"])
+        pred_loss_eval = losses["pred"]
+        pred_re_loss_eval = losses["pred_re"]
+        print(
+            f"EVAL: "
+            # f"step {iter_num}: train loss {losses['train']:.3e}, "
+            # f"val loss {losses['val']:.3e}, "
+            f"pred loss {losses['pred']:.3e}, "
+            f"pred loss re {losses['pred_re']:.3e}, "
+        )
         if losses["pred"] < best_pred_loss:
             best_pred_loss = losses["pred"]
             if iter_num > 0:
@@ -516,10 +581,10 @@ while True:
                 {
                     "iter": iter_num,
                     "loss_train": lossf,
-                    "val/loss_train": losses["train"],
-                    "val/loss_eval": losses["val"],
-                    "val/loss_pred": losses["pred"],
-                    "val/loss_pred_re": losses["pred_re"],
+                    "val/loss_train": train_loss_eval,
+                    "val/loss_eval": train_loss_eval,
+                    "val/loss_pred": pred_loss_eval,
+                    "val/loss_pred_re": pred_re_loss_eval,
                     "lr": lr,
                     "mfu": running_mfu * 100,  # convert to percentage
                     "norm": norm.item(),  # convert to percentage
