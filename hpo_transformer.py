@@ -50,9 +50,9 @@ if __name__ == "__main__":
         name="transformer",
         seed=seed,
         space={
-            "pe_type": Categorical("pe_type", ["APE", "ALiBi"]),
+            "pe_type": Categorical("pe_type", ["APE", "RoPE", "ALiBi"]),
             # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
-            # "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
+            "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
             # "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
@@ -63,7 +63,7 @@ if __name__ == "__main__":
                 [2, 4, 8, 12, 16, 32, 64],
                 ordered=True,
             ),
-            "seq_len": Categorical("seq_len", [256, 512, 1024, 2048], ordered=True),
+            "seq_len": Categorical("seq_len", [256, 512, 1024], ordered=True),
             "n_layer": Integer("n_layer", bounds=(8, 25)),
             # "bias": Categorical("bias", [True, False], default=False),
             # "learning_rate": Float(
@@ -76,7 +76,7 @@ if __name__ == "__main__":
         },
     )
 
-    # cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
+    cs.add_condition(EqualsCondition(cs["rope_theta"], cs["pe_type"], "RoPE"))
 
     # Function to find the forbidden heads for a given dim_model.
     def forbidden_heads_for_dim_model(dim_model, n_heads):
@@ -110,10 +110,10 @@ if __name__ == "__main__":
         name="transformer_30",
         output_directory=Path(f"{Path.cwd()}/hpo"),
         deterministic=True,
-        n_trials=200,
+        n_trials=75,
         # termination_cost_threshold=0.01,
-        min_budget=100,
-        max_budget=1000,
+        min_budget=75,
+        max_budget=675,
         n_workers=4,
     )
 

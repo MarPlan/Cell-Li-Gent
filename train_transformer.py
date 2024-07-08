@@ -72,7 +72,6 @@ parser.add_argument("--warmup_iters", type=int)
 parser.add_argument("--weight_decay", type=float)
 parser.add_argument("--grad_clip", type=float)
 # evaluation
-parser.add_argument("--print_gpu", type=int)
 parser.add_argument("--wandb_log", type=int)
 parser.add_argument("--eval_interval", type=str)
 # # memory management
@@ -86,7 +85,6 @@ parser.add_argument("--wandb_api_key", type=str)
 # default config values designed to train a Transformer with 124M params
 # I/O
 wandb_api_key = ""
-print_gpu = False
 out_dir = "ckpt/transformer/"
 eval_interval = 250
 log_interval = 1
@@ -100,31 +98,32 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
 
+pe_type = "APE"
+rope_theta = 666
+seq_len = 512
+n_layer = 10
+n_heads = 8
+dim_model = 386
+
 gradient_accumulation_steps = 1  # used to simulate larger batch sizes
 batch_size = (
-    256 // gradient_accumulation_steps
+    524_288 // seq_len // gradient_accumulation_steps
 )  # 524_288 if gradient_accumulation_steps > 1, this is the micro-batch size
-
-pe_type = "ALiBi"
-rope_theta = 666
-seq_len = 2048
-# model
-n_layer = 16
-n_heads = 16
-dim_model = 512
-learning_rate = 2e-3  # max learning rate
-min_lr = 1e-7  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
-warmup_iters = 200  # how many steps to warm up for
-decay_iters = 1000  # how many steps to decay for ~1 epoch to min_lr
 max_iters = (
     np.floor(
         3_000 * 0.8 * 360_000 // (gradient_accumulation_steps * batch_size * seq_len)
     )
     * 40
 )  # total number of training iterations
-lr_decay_iters = max_iters  # should be ~= max_iters per Chinchilla
 
+learning_rate = 2e-3  # max learning rate
+min_lr = 0  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+warmup_iters = 200  # how many steps to warm up for
+decay_iters = np.floor(
+    3_000 * 0.8 * 360_000 / seq_len / gradient_accumulation_steps / batch_size
+)  # how many steps to decay for ~1 epoch to min_lr
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 # step =  batch_size * seq_len * gradient_accumulation_steps # 32_768 datapoints per iteration
@@ -220,7 +219,7 @@ model_args = ModelArgs(
     bias=bias,
     dropout=dropout,
     pe_type=pe_type,
-    device=device
+    device=device,
 )  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
@@ -263,7 +262,6 @@ checkpoint = None  # free up memory
 
 if compile:
     print("compiling the model... (takes a ~minute)")
-    unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
 
 
@@ -273,46 +271,47 @@ def estimate_loss(file_path=data_file, dataset_name=dataset):
     model.eval()
     for split in ["train", "val", "pred"]:
         losses = torch.zeros(eval_iters)
+        train_data.first = True
         for k in range(eval_iters):
             X, Y = train_data.get_batch(split)
             if split == "pred":
                 y_hat = []
                 with ctx:
                     input = X[:, :seq_len]
-                    for i in range(6144):
+                    for i in range(8192 - seq_len):
                         y, _ = model(input)
                         y_hat.append(y)
                         input = torch.roll(input, -1, 1)
                         input[:, -1, :3] = X[:, seq_len + i, :3]
-                        input[:, -1, 3:] = y[:, -1, 2:]
+                        input[:, -1, 3:] = y[:, -1, 3:]
                     y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                     # Perform the rescaling using broadcasting
-                    # with h5py.File(file_path, "r") as file:
-                    #     data_scaled = file[dataset_name]
-                    #     mins, maxs = (
-                    #         data_scaled.attrs["min_values"],
-                    #         data_scaled.attrs["max_values"],
-                    #     )
-                    # maxs_expanded = torch.tensor(
-                    #     maxs[np.newaxis, np.newaxis, :], device=X.device
-                    # )
-                    # mins_expanded = torch.tensor(
-                    #     mins[np.newaxis, np.newaxis, :], device=X.device
-                    # )
-                    # # X = X * (maxs_expanded - mins_expanded) + mins_expanded
-                    # Y = Y * (maxs_expanded - mins_expanded) + mins_expanded
-                    # y_hat = (
-                    #     y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
-                    #     + mins_expanded[:, :, 1:]
-                    # )
-                losses = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
+                    with h5py.File(file_path, "r") as file:
+                        data_scaled = file[dataset_name]
+                        mins, maxs = (
+                            data_scaled.attrs["min_values"],
+                            data_scaled.attrs["max_values"],
+                        )
+                    maxs_expanded = torch.tensor(
+                        maxs[np.newaxis, np.newaxis, :], device=X.device
+                    )
+                    mins_expanded = torch.tensor(
+                        mins[np.newaxis, np.newaxis, :], device=X.device
+                    )
+                    # X = X * (maxs_expanded - mins_expanded) + mins_expanded
+                    Y_re = Y * (maxs_expanded - mins_expanded) + mins_expanded
+                    y_hat_re = y_hat * (maxs_expanded - mins_expanded) + mins_expanded
+                losses_re = F.mse_loss(Y_re[:, -4096:, :], y_hat_re[:, -4096:, :])
+                losses = F.mse_loss(Y[:, -4096:, :], y_hat[:, -4096:, :])
                 if k == 1:
                     break
             else:
                 with ctx:
-                    _, loss = model(X, Y[:,:,1:])
+                    _, loss = model(X, Y[:, :, 1:])
                 losses[k] = loss
         out[split] = losses.mean().to("cpu").item()
+        if split == "pred":
+            out[split + "_re"] = losses_re.mean().to("cpu").item()
     model.train()
     return out
 
@@ -387,7 +386,7 @@ class LRScheduler:
 
 lr_scheduler = LRScheduler(
     initial_lr=learning_rate,
-    warmup_lr=learning_rate / 10,
+    warmup_lr=learning_rate,
     warmup_iters=200,
     max_iters=decay_iters,
     min_lr=min_lr,
@@ -402,10 +401,10 @@ if wandb_log:
 
 # training loop
 X, Y = train_data.get_batch("train")  # fetch the very first batch
-t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
 running_mfu = -1.0
 lr = 0
+t0 = time.time()
 while True:
     # determine and set the learning rate for this iteration
     lr = lr_scheduler.get_lr(iter_num, lr) if decay_lr else learning_rate
@@ -420,6 +419,7 @@ while True:
             f"step {iter_num}: train loss {losses['train']:.3e}, "
             f"val loss {losses['val']:.3e}, "
             f"pred loss {losses['pred']:.3e}, "
+            f"pred loss re {losses['pred_re']:.3e}, "
         )
         if losses["val"] < best_val_loss:
             best_val_loss = losses["val"]
@@ -431,6 +431,7 @@ while True:
                     "iter_num": iter_num,
                     "best_val_loss": best_val_loss,
                     "best_pred_loss": best_pred_loss,
+                    "best_pred_loss_re": losses["pred_re"],
                     "config": config,
                 }
                 print(f"saving val checkpoint to {out_dir}")
@@ -453,6 +454,7 @@ while True:
                     "iter_num": iter_num,
                     "best_val_loss": best_val_loss,
                     "best_pred_loss": best_pred_loss,
+                    "best_pred_loss_re": losses["pred_re"],
                     "config": config,
                 }
                 print(f"saving pred checkpoint to {out_dir}")
@@ -468,7 +470,7 @@ while True:
     # batch size and using the GradScaler if data type is float16
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
-            _, loss = model(X, Y[:, :, 1:])
+            _, loss = model(X, Y)
             loss = (
                 loss / gradient_accumulation_steps
             )  # scale the loss to account for gradient accumulation
@@ -517,6 +519,7 @@ while True:
                     "val/loss_train": losses["train"],
                     "val/loss_eval": losses["val"],
                     "val/loss_pred": losses["pred"],
+                    "val/loss_pred_re": losses["pred_re"],
                     "lr": lr,
                     "mfu": running_mfu * 100,  # convert to percentage
                     "norm": norm.item(),  # convert to percentage

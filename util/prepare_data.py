@@ -10,7 +10,7 @@ class BatteryData:
         self.dataset = dataset
 
         self.batch_size = batch_size
-        self.sub_seq_len = seq_len
+        self.sub_seq_len = seq_len + 1
         self.device = device
         self.first = True
 
@@ -40,7 +40,7 @@ class BatteryData:
         if split == "pred":
             # Using validation data
             # pred_horizon = 6  # factor for seq_len prediction horizon
-            pred_horizon = 4 * 2048
+            pred_horizon = 4 * 2048 + 1
             seq_indices = np.random.randint(
                 np.ceil(self.n_series * 0.8) - 1, self.n_series, 16
             )
@@ -86,6 +86,8 @@ class BatteryData:
                 ]
             ).to(torch.float32)
 
+        y = torch.cat([x[:, 1:, 0:1], y[:, :-1, 1:]], dim=2)
+        x = torch.cat([x[:, 1:, 0:1], x[:, :-1, 1:]], dim=2)
         # If using CUDA, use pinned memory for asynchronous transfers to GPU
         if self.device == "cuda":
             x, y = (
@@ -99,3 +101,4 @@ class BatteryData:
             )  # Standard tensor transfer to the specified device
 
         return torch.round(x, decimals=4), torch.round(y, decimals=4)
+

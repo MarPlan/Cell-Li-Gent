@@ -69,7 +69,7 @@ def train(
     rope_theta = config["rope_theta"] if pe_type == "RoPE" else 666
 
     bias = False
-    learning_rate = 2e-3
+    learning_rate = 1e-3
     loss_type = "MSE"
     norm_type = "RMSNorm"
     reduction = "mean"
@@ -106,13 +106,13 @@ def train(
         else batch_size_new
     )
     gradient_accumulation_steps = 1 if grad_acc is None else grad_acc
-    lr_decay_iter = 2500
-    min_lr = 1e-7
+    lr_decay_iter = 1200
+    min_lr = 3e-7
     weight_decay = 1e-1
     beta1 = 0.9
     beta2 = 0.95
     grad_clip = 1.0
-    warmup_iters = 100
+    warmup_iters = 75
     dtype = (
         "bfloat16"
         if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
@@ -152,12 +152,12 @@ def train(
                     y_hat = []
                     with ctx:
                         input = X[:, :seq_len]
-                        for i in range(6144):
+                        for i in range(8192 - seq_len):
                             y, _ = model(input)
                             y_hat.append(y)
                             input = torch.roll(input, -1, 1)
                             input[:, -1, :3] = X[:, seq_len + i, :3]
-                            input[:, -1, 3:] = y[:, -1, 2:]
+                            input[:, -1, 3:] = y[:, -1, 3:]
                         y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                         # Perform the rescaling using broadcasting
                         with h5py.File(file_path, "r") as file:
@@ -175,11 +175,12 @@ def train(
                         # X = X * (maxs_expanded - mins_expanded) + mins_expanded
                         Y_re = Y * (maxs_expanded - mins_expanded) + mins_expanded
                         y_hat_re = (
-                            y_hat * (maxs_expanded[:, :, 1:] - mins_expanded[:, :, 1:])
-                            + mins_expanded[:, :, 1:]
+                            y_hat * (maxs_expanded - mins_expanded) + mins_expanded
                         )
-                    losses_re[k] = F.mse_loss(Y_re[:, -4096:, 1:], y_hat_re[:, -4096:])
-                    losses[k] = F.mse_loss(Y[:, -4096:, 1:], y_hat[:, -4096:])
+                    losses_re[k] = F.mse_loss(
+                        Y_re[:, -4096:, :], y_hat_re[:, -4096:, :]
+                    )
+                    losses[k] = F.mse_loss(Y[:, -4096:, :], y_hat[:, -4096:, :])
                     # if k == 1:
                     #    break
                 else:
@@ -271,7 +272,7 @@ def train(
                     best_pred_loss_re = losses["pred_re"]
             for micro_step in range(gradient_accumulation_steps):
                 with ctx:
-                    _, loss = model(X, Y[:, :, 1:])
+                    _, loss = model(X, Y)
                     loss = loss / gradient_accumulation_steps
                 X, Y = train_data.get_batch("train")
                 scaler.scale(loss).backward()

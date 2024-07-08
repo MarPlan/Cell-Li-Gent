@@ -19,17 +19,17 @@ from flash_attn import flash_attn_func
 
 @dataclass
 class ModelArgs:
-    dim_out: int = 5
+    dim_out: int = 6
     dim_inp: int = 6
     pe_type: str = "RoPE"
     norm_type: str = "RMSNorm"
-    dim_model: int = 256
-    n_heads: int = 4
-    seq_len: int = 256
-    max_seq_len: int = 256
+    dim_model: int = 386
+    n_heads: int = 8
+    seq_len: int = 512
+    max_seq_len: int = 512
     rope_theta: float = 10000.0
     dropout: float = 0.0
-    n_layer: int = 6
+    n_layer: int = 10
     bias: bool = False
     act_type: str = "SwiGLU"
     loss: str = "MSE"
@@ -301,6 +301,7 @@ class Transformer(nn.Module):
                 else nn.LayerNorm(config.dim_model, bias=config.bias),
             )
         )
+
         self.output = nn.Linear(config.dim_model, config.dim_out, bias=config.bias)
 
         # init all weights
@@ -331,8 +332,8 @@ class Transformer(nn.Module):
             x = block(x)
         x = self.transformer.ln_f(x)
         if y is not None:
+            out = F.linear(x, self.transformer["inp_emb"].weight.T)
             # if we are given some desired targets also calculate the loss
-            out = self.output(x)
             if self.training:
                 if self.loss == "MSE":
                     loss = F.mse_loss(out, y, reduction=self.reduction)
@@ -345,8 +346,8 @@ class Transformer(nn.Module):
                 loss = F.mse_loss(out, y, reduction="mean")
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
-            out = self.output(
-                x[:, [-1], :]
+            out = F.linear(
+                x[:, [-1], :], self.transformer["inp_emb"].weight.T
             )  # note: using list [-1] to preserve the time dim
             loss = None
 

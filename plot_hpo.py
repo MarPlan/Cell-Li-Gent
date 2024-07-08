@@ -30,20 +30,20 @@ def plot_hpo_partial(save=False):
     cs = ConfigurationSpace(
         name="transformer",
         space={
-            "pe_type": Categorical("pe_type", ["RoPE", "APE", "ALiBi"]),
-            # "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
+            "pe_type": Categorical("pe_type", ["APE","RoPE", "ALiBi"]),
+            #"norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
             "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
-            "reduction": Categorical("reduction", ["sum", "mean"]),
+            # "reduction": Categorical("reduction", ["sum", "mean"]),
             "dim_model": Categorical(
                 "dim_model", [64, 128, 256, 384, 512, 768], ordered=True
             ),
             "n_heads": Categorical(
                 "n_heads",
-                [2, 4, 8, 12, 16, 32, 64, 128, 256, 384, 512],
+                [2, 4, 8, 12, 16, 32, 64],
                 ordered=True,
             ),
-            "seq_len": Categorical("seq_len", [256, 512, 1024, 2048], ordered=True),
+            "seq_len": Categorical("seq_len", [256, 512, 1024], ordered=True),
             "n_layer": Integer("n_layer", bounds=(8, 25)),
             # "bias": Categorical("bias", [True, False], default=False),
             # "learning_rate": Float(
@@ -120,7 +120,7 @@ def plot_hpo_partial(save=False):
     # item['loss'] = loss_function_map[item['loss']]
     # item['norm_type'] = normalization_map[item['norm_type']]
         item['pe_type'] = positional_encoding_map[item['pe_type']]
-        item['reduction'] = reduction_map[item['reduction']]
+        # item['reduction'] = reduction_map[item['reduction']]
 
     # Convert the hyperparameters to a format suitable for the Result object
     hypparam_names = list(cs.keys())
@@ -134,12 +134,12 @@ def plot_hpo_partial(save=False):
 
     # Assume `hyperparameters` is a list of configurations and `costs` is a list of corresponding costs
     hyperparameters = np.array(hyperparameters).astype(np.float64)
-    hyperparameters= np.concatenate((hyperparameters, np.array(extracted_data["budget"]).reshape(-1, 1)), axis=1)
-    hypparam_names.append("budget")
+    # hyperparameters= np.concatenate((hyperparameters, np.array(extracted_data["budget"]).reshape(-1, 1)), axis=1)
+    # hypparam_names.append("budget")
 
     costs = np.array(extracted_data["cost"]).astype(np.float64)
-    mask = costs != 1e7
-    # mask = (costs != 1e7) & (np.array(extracted_data["budget"]) > 200)
+    # mask = costs != 1e7
+    mask = (costs != 1e7) & (np.array(extracted_data["budget"]) > 600)
     costs = costs[mask]
     hyperparameters = hyperparameters[mask]
 

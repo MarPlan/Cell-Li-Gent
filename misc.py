@@ -72,8 +72,49 @@ class LRScheduler:
 
         return current_lr
 
+def estimate_loss(file_path, dataset_name):
+    # for split in ["train", "val", "pred"]:
+    device = "cpu"
+    batch_size =12
+    seq_len = 2048
+    train_data = BatteryData(data_file, dataset, batch_size, seq_len, device)
+    for split in ["pred"]:
+        seed = 422
+        np.random.seed(seed)
+        for k in range(1):
+            X, Y = train_data.get_batch(split)
+            if split == "pred":
+                # Perform the rescaling using broadcasting
+                with h5py.File(file_path, "r") as file:
+                    data_scaled = file[dataset_name]
+                    mins, maxs = (
+                        data_scaled.attrs["min_values"],
+                        data_scaled.attrs["max_values"],
+                    )
+                maxs_expanded = torch.tensor(
+                    maxs[np.newaxis, np.newaxis, :], device=X.device
+                )
+                mins_expanded = torch.tensor(
+                    mins[np.newaxis, np.newaxis, :], device=X.device
+                )
+                X = X * (maxs_expanded - mins_expanded) + mins_expanded
+                Y_re = Y * (maxs_expanded - mins_expanded) + mins_expanded
+                plt.plot(Y_re[0,:,0])
+                t =9
 
 if __name__ == "__main__":
+    import os
+
+    import h5py
+    import torch
+
+    from util.prepare_data import BatteryData
+    dataset = "spme_training_scaled"
+    data_file = os.path.abspath("data/train/battery_data.h5")
+    estimate_loss(data_file, dataset)
+
+
+
     scheduler = LRScheduler(
         initial_lr=3e-3,
         warmup_lr=3e-4,
