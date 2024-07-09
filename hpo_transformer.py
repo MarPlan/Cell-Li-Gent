@@ -112,7 +112,7 @@ if __name__ == "__main__":
         deterministic=True,
         n_trials=500,
         # termination_cost_threshold=0.01,
-        min_budget=120,
+        min_budget=1620,
         max_budget=3240,
         n_workers=4,
     )
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     initial_design = MFFacade.get_initial_design(scenario, n_configs=5)
 
     # Create our intensifier
-    intensifier = Hyperband(scenario, eta=3, incumbent_selection="highest_budget")
+    intensifier = Hyperband(scenario, eta=2, incumbent_selection="highest_budget")
 
     class CustomCallback(Callback):
         def __init__(self) -> None:

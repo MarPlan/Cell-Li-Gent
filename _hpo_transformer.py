@@ -188,7 +188,7 @@ def train(
         ax = fig.subplots(5, 1, sharex=True)
 
         X = X[:, seq_len:].to(torch.float32).cpu().numpy()
-        Y = Y[:, seq_len:].to(torch.float32).cpu().numpy()
+        Y_re = Y_re[:, seq_len:].to(torch.float32).cpu().numpy()
         y_hat_re = y_hat_re.to(torch.float32).cpu().numpy()
 
         batch_nr = 0
@@ -196,26 +196,26 @@ def train(
             ax[0].plot(X[batch_nr, :, i], label="X")
 
         for i in [1, 5]:
-            ax[1].plot(Y[batch_nr, :, i], label="Y")
+            ax[1].plot(Y_re[batch_nr, :, i], label="Y")
             ax[1].plot(y_hat_re[batch_nr, :, i], "--", label="y_hat")
 
         for i in [2, 4]:
-            ax[2].plot(Y[batch_nr, :, i], label="Y")
+            ax[2].plot(Y_re[batch_nr, :, i], label="Y")
             ax[2].plot(y_hat_re[batch_nr, :, i], "--", label="y_hat")
 
         for i in [3]:
-            ax[3].plot(Y[batch_nr, :, i], label="Y")
+            ax[3].plot(Y_re[batch_nr, :, i], label="Y")
             ax[3].plot(y_hat_re[batch_nr, :, i], "--", label="y_hat")
 
         for i in [0]:
-            ax[4].plot(Y[batch_nr, :, i], label="Y")
+            ax[4].plot(Y_re[batch_nr, :, i], label="Y")
             ax[4].plot(y_hat_re[batch_nr, :, i], "--", label="y_hat")
 
         import time
 
         plt.tight_layout()
 
-        out_path = f"hpo/loss_re_{out["pred_re"]}_time_{time.time()}.png"
+        out_path = f"hpo/loss_re_{out['pred_re']}_time_{time.time()}.png"
         fig.savefig(out_path, dpi=300)
         model.train()
         return out

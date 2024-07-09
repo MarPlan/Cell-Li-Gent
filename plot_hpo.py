@@ -30,8 +30,8 @@ def plot_hpo_partial(save=False):
     cs = ConfigurationSpace(
         name="transformer",
         space={
-            "pe_type": Categorical("pe_type", ["APE","RoPE", "ALiBi"]),
-            #"norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
+            "pe_type": Categorical("pe_type", ["APE", "RoPE", "ALiBi"]),
+            "norm_type": Categorical("norm_type", ["RMSNorm", "LayerNorm"]),
             "rope_theta": Float("rope_theta", bounds=(500, 200_000)),
             # "loss": Categorical("loss", ["MSE", "MAE"]),
             # "reduction": Categorical("reduction", ["sum", "mean"]),
@@ -43,7 +43,7 @@ def plot_hpo_partial(save=False):
                 [2, 4, 8, 12, 16, 32, 64],
                 ordered=True,
             ),
-            "seq_len": Categorical("seq_len", [256, 512, 1024], ordered=True),
+            "seq_len": Categorical("seq_len", [128, 256, 512, 768, 1024, 1536], ordered=True),
             "n_layer": Integer("n_layer", bounds=(8, 25)),
             # "bias": Categorical("bias", [True, False], default=False),
             # "learning_rate": Float(
@@ -88,7 +88,7 @@ def plot_hpo_partial(save=False):
     runhistory = RunHistory()
 
     # Load the run history from a JSON file
-    runhistory.load("hpo/transformer_30/0/runhistory.json", cs)
+    runhistory.load("hpo/transformer_final/0/runhistory.json", cs)
 
     # Extract the configuration IDs and corresponding costs
     extracted_data = {"budget": [], "config_id": [], "cost": [], "starttime": [], "endtime": []}
@@ -110,7 +110,7 @@ def plot_hpo_partial(save=False):
     # Define the mappings
     # activation_function_map = {"GeLU": 0, "SwiGLU": 1}
     # loss_function_map = {"MAE": 0, "MSE": 1}
-    # normalization_map = {"RMSNorm": 0, "LayerNorm": 1}
+    normalization_map = {"RMSNorm": 0, "LayerNorm": 1}
     positional_encoding_map = {"ALiBi": 0,"RoPE": 1, "APE":2}
     reduction_map = {"sum": 0, "mean": 1}
 
@@ -118,7 +118,7 @@ def plot_hpo_partial(save=False):
     for item in hyperparameters:
     # item['act_type'] = activation_function_map[item['act_type']]
     # item['loss'] = loss_function_map[item['loss']]
-    # item['norm_type'] = normalization_map[item['norm_type']]
+        item['norm_type'] = normalization_map[item['norm_type']]
         item['pe_type'] = positional_encoding_map[item['pe_type']]
         # item['reduction'] = reduction_map[item['reduction']]
 
@@ -134,12 +134,12 @@ def plot_hpo_partial(save=False):
 
     # Assume `hyperparameters` is a list of configurations and `costs` is a list of corresponding costs
     hyperparameters = np.array(hyperparameters).astype(np.float64)
-    # hyperparameters= np.concatenate((hyperparameters, np.array(extracted_data["budget"]).reshape(-1, 1)), axis=1)
-    # hypparam_names.append("budget")
+    hyperparameters= np.concatenate((hyperparameters, np.array(extracted_data["budget"]).reshape(-1, 1)), axis=1)
+    hypparam_names.append("budget")
 
     costs = np.array(extracted_data["cost"]).astype(np.float64)
-    # mask = costs != 1e7
-    mask = (costs != 1e7) & (np.array(extracted_data["budget"]) > 600)
+    mask = costs != 1e7
+    # mask = (costs != 1e7) & (np.array(extracted_data["budget"]) > 3200)
     costs = costs[mask]
     hyperparameters = hyperparameters[mask]
 
@@ -152,8 +152,6 @@ def plot_hpo_partial(save=False):
     # Scale X and y
     X_scaled = scaler_X.fit_transform(hyperparameters)
     y_scaled = scaler_y.fit_transform(costs.reshape(-1, 1)).flatten()
-
-    from sklearn.neighbors import KNeighborsClassifier
 
     # Define your SVR model
     svr = SVR()

@@ -74,7 +74,7 @@ parser.add_argument("--weight_decay", type=float)
 parser.add_argument("--grad_clip", type=float)
 # evaluation
 parser.add_argument("--wandb_log", type=int)
-parser.add_argument("--eval_interval", type=str)
+# parser.add_argument("--eval_interval", type=str)
 # # memory management
 parser.add_argument("--device", type=str)
 parser.add_argument("--compile", type=int)
@@ -87,9 +87,9 @@ parser.add_argument("--wandb_api_key", type=str)
 # I/O
 wandb_api_key = ""
 out_dir = "ckpt/transformer/"
-eval_interval = 250
+# eval_interval = 250
 log_interval = 1
-eval_iters = 200
+eval_iters = 100
 init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
 wandb_log = 1  # disabled by default
@@ -99,12 +99,12 @@ wandb_run_name = "transformer"  # 'run' + str(time.time())
 dataset = "spme_training_scaled"
 data_file = os.path.abspath("data/train/battery_data.h5")
 
+seq_len = 2048
+n_layer = 25
+n_heads = 4
 pe_type = "APE"
-rope_theta = 666
-seq_len = 512
-n_layer = 12
-n_heads = 8
 dim_model = 256
+rope_theta = 666
 
 gradient_accumulation_steps = 1  # used to simulate larger batch sizes
 batch_size = (
@@ -266,47 +266,10 @@ if compile:
     model = torch.compile(model)  # requires PyTorch 2.0
 
 
-def check_in_out(
-    x, y, y_hat, y_hat_pseudo, file_path=None, dataset_name=None, ckpt_path=None
-):
-    fig = plt.figure(dpi=300)
-    ax = fig.subplots(5, 1, sharex=True)
-
-    batch_nr = 0
-    for i in range(x.shape[-1]):
-        ax[0].plot(x[batch_nr, :, i], label="X")
-
-    for i in [1, 5]:
-        ax[1].plot(y[batch_nr, :, i], label="Y")
-        ax[1].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
-        ax[1].plot(y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
-
-    for i in [2, 4]:
-        ax[2].plot(y[batch_nr, :, i], label="Y")
-        ax[2].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
-        ax[2].plot(y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
-
-    for i in [3]:
-        ax[3].plot(y[batch_nr, :, i], label="Y")
-        ax[3].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
-        ax[3].plot(y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
-
-    for i in [0]:
-        ax[4].plot(y[batch_nr, :, i], label="Y")
-        ax[4].plot(y_hat[batch_nr, :, i], "--", label="y_hat")
-        ax[4].plot(y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
-
-    plt.tight_layout()
-    # plt.show()
-    fig.savefig(ckpt_path.replace(".pt", ".png"), dpi=300)
-    # plt.show()
-
-
 @torch.no_grad()
 def estimate_loss(file_path=data_file, dataset_name=dataset, splits=[]):
     out = {}
     model.eval()
-    # for split in ["train", "val", "pred"]:
     for split in splits:
         losses = torch.zeros(eval_iters)
         train_data.first = True
@@ -320,8 +283,8 @@ def estimate_loss(file_path=data_file, dataset_name=dataset, splits=[]):
                         y, _ = model(input)
                         y_hat.append(y)
                         input = torch.roll(input, -1, 1)
-                        input[:, -1, :3] = X[:, seq_len + i, :3]
-                        input[:, -1, 3:] = y[:, -1, 3:]
+                        input[:, -1, 0] = X[:, seq_len + i, 0]
+                        input[:, -1, 1:] = y[:, -1, 1:]
                     y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                     # Perform the rescaling using broadcasting
                     with h5py.File(file_path, "r") as file:
@@ -344,8 +307,7 @@ def estimate_loss(file_path=data_file, dataset_name=dataset, splits=[]):
                 print(
                     f"loss {losses.mean().to(torch.float32).to('cpu').item()}, lossre {losses_re.mean().to(torch.float32).to('cpu').item()}"
                 )
-                if k == 1:
-                    break
+                break
             else:
                 with ctx:
                     _, loss = model(X, Y)
@@ -354,16 +316,39 @@ def estimate_loss(file_path=data_file, dataset_name=dataset, splits=[]):
         if split == "pred":
             out[split + "_re"] = losses_re.mean().to("cpu").item()
 
-            check_in_out(
-                X[:, seq_len:].to(torch.float32).cpu().numpy(),
-                Y[:, seq_len:].to(torch.float32).cpu().numpy(),
-                y_hat_re.to(torch.float32).cpu().numpy(),
-                y_hat_re.to(torch.float32).cpu().numpy(),
-                # y_hat_pseudo.to(torch.float32).cpu().numpy(),
-                file_path=data_file,
-                dataset_name=dataset,
-                ckpt_path="ckpt/transformer/v_1/pic.pt",
-            )
+            fig = plt.figure()
+            ax = fig.subplots(5, 1, sharex=True)
+
+            X = X[:, seq_len:].to(torch.float32).cpu().numpy()
+            Y_re = Y_re[:, seq_len:].to(torch.float32).cpu().numpy()
+            y_hat_re = y_hat_re.to(torch.float32).cpu().numpy()
+
+            batch_nr = 0
+            for i in range(X.shape[-1]):
+                ax[0].plot(X[batch_nr, :, i], label="X")
+
+            for i in [1, 5]:
+                ax[1].plot(Y_re[batch_nr, :, i], label="Y")
+                ax[1].plot(y_hat_re[batch_nr, :, i], "--", label="y_hat")
+
+            for i in [2, 4]:
+                ax[2].plot(Y_re[batch_nr, :, i], label="Y")
+                ax[2].plot(y_hat_re[batch_nr, :, i], "--", label="y_hat")
+
+            for i in [3]:
+                ax[3].plot(Y_re[batch_nr, :, i], label="Y")
+                ax[3].plot(y_hat_re[batch_nr, :, i], "--", label="y_hat")
+
+            for i in [0]:
+                ax[4].plot(Y_re[batch_nr, :, i], label="Y")
+                ax[4].plot(y_hat_re[batch_nr, :, i], "--", label="y_hat")
+
+            import time
+
+            plt.tight_layout()
+
+            out_path = f"{out_dir}loss_re_{out['pred_re']}_time_{time.time()}.png"
+            fig.savefig(out_path, dpi=300)
     model.train()
     return out
 
@@ -439,7 +424,7 @@ class LRScheduler:
 lr_scheduler = LRScheduler(
     initial_lr=learning_rate,
     warmup_lr=learning_rate,
-    warmup_iters=200,
+    warmup_iters=warmup_iters,
     max_iters=decay_iters,
     min_lr=min_lr,
     decay_iters=decay_iters,
@@ -464,7 +449,7 @@ while True:
         param_group["lr"] = lr
 
     # evaluate the loss on train/val sets and write checkpoints
-    if iter_num % np.floor(decay_iters / 5) == 0:
+    if iter_num % np.floor(decay_iters / 4) == 0:
         losses = estimate_loss(splits=["train", "val"])
         train_loss_eval = losses["train"]
         val_loss_eval = losses["val"]
