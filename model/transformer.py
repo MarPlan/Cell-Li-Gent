@@ -21,15 +21,15 @@ from flash_attn import flash_attn_func
 class ModelArgs:
     dim_out: int = 6
     dim_inp: int = 6
-    pe_type: str = "RoPE"
-    norm_type: str = "RMSNorm"
-    dim_model: int = 386
-    n_heads: int = 8
-    seq_len: int = 512
-    max_seq_len: int = 512
+    pe_type: str = "APE"
+    norm_type: str = "LayerNorm"
+    dim_model: int = 256
+    n_heads: int = 4
+    seq_len: int = 2048
+    max_seq_len: int = 2048
     rope_theta: float = 10000.0
     dropout: float = 0.0
-    n_layer: int = 10
+    n_layer: int = 25
     bias: bool = False
     act_type: str = "SwiGLU"
     loss: str = "MSE"

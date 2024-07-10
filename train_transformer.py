@@ -114,15 +114,16 @@ max_iters = (
     np.floor(
         3_000 * 0.8 * 360_000 // (gradient_accumulation_steps * batch_size * seq_len)
     )
-    * 40
+    * 4
 )  # total number of training iterations
 
 learning_rate = 2e-3  # max learning rate
-min_lr = 1e-9  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+min_lr = 1e-4  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 warmup_iters = 200  # how many steps to warm up for
-decay_iters = np.floor(
-    3_000 * 0.8 * 360_000 / seq_len / gradient_accumulation_steps / batch_size
-)  # how many steps to decay for ~1 epoch to min_lr
+decay_iters = max_iters
+# np.floor(
+#     3_000 * 0.8 * 360_000 / seq_len / gradient_accumulation_steps / batch_size
+# )  # how many steps to decay for ~1 epoch to min_lr
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 
 bias = False  # do we use bias inside LayerNorm and Linear layers?
@@ -279,12 +280,13 @@ def estimate_loss(file_path=data_file, dataset_name=dataset, splits=[]):
                 y_hat = []
                 with ctx:
                     input = X[:, :seq_len]
+                    y, _ = model(input)
                     for i in range(8192 - seq_len):
-                        y, _ = model(input)
-                        y_hat.append(y)
                         input = torch.roll(input, -1, 1)
                         input[:, -1, 0] = X[:, seq_len + i, 0]
                         input[:, -1, 1:] = y[:, -1, 1:]
+                        y, _ = model(input)
+                        y_hat.append(y)
                     y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                     # Perform the rescaling using broadcasting
                     with h5py.File(file_path, "r") as file:
@@ -317,6 +319,8 @@ def estimate_loss(file_path=data_file, dataset_name=dataset, splits=[]):
             out[split + "_re"] = losses_re.mean().to("cpu").item()
 
             fig = plt.figure()
+            fig_size_big = (15, 15)
+            fig.set_size_inches(fig_size_big)
             ax = fig.subplots(5, 1, sharex=True)
 
             X = X[:, seq_len:].to(torch.float32).cpu().numpy()
@@ -347,8 +351,17 @@ def estimate_loss(file_path=data_file, dataset_name=dataset, splits=[]):
 
             plt.tight_layout()
 
-            out_path = f"{out_dir}loss_re_{out['pred_re']}_time_{time.time()}.png"
-            fig.savefig(out_path, dpi=300)
+            out_path = f"{out_dir}loss_re_{out['pred_re']}_time_{time.time()}.pdf"
+            data = np.stack((X, Y_re, y_hat_re))
+            np.save(out_path.replace(".pdf", ".npy"), data, allow_pickle=False)
+            plt.savefig(
+                out_path,
+                format="pdf",
+                bbox_inches="tight",
+                # pad_inches=[0, 0, 1, 0]
+                # pad_inches="tight"
+                dpi=300,
+            )
     model.train()
     return out
 
@@ -483,7 +496,7 @@ while True:
                     ),
                 )
 
-    if iter_num % np.floor((decay_iters)) == 0:
+    if iter_num % np.floor((decay_iters/2)) == 0:
         losses = estimate_loss(splits=["pred"])
         pred_loss_eval = losses["pred"]
         pred_re_loss_eval = losses["pred_re"]

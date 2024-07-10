@@ -14,7 +14,11 @@ from util.prepare_data import BatteryData
 def check_in_out(
     x, y, y_hat, y_hat_pseudo, file_path=None, dataset_name=None, ckpt_path=None
 ):
+    data = np.stack((x, y, y_hat, y_hat_pseudo))
+    np.save(ckpt_path.replace(".pt", ".npy"), data, allow_pickle=False)
     fig = plt.figure(dpi=300)
+    fig_size_big = (15, 15)
+    fig.set_size_inches(fig_size_big)
     ax = fig.subplots(5, 1, sharex=True)
 
     batch_nr = 0
@@ -42,8 +46,14 @@ def check_in_out(
         ax[4].plot(y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
 
     plt.tight_layout()
-    plt.show()
-    fig.savefig(ckpt_path.replace(".pt", ".png"), dpi=300)
+    plt.savefig(
+        ckpt_path.replace(".pt", ".png"),
+        format="pdf",
+        bbox_inches="tight",
+        # pad_inches=[0, 0, 1, 0]
+        # pad_inches="tight"
+        dpi=300,
+    )
     plt.show()
 
 
@@ -60,18 +70,20 @@ def estimate_loss(file_path=None, dataset_name=None):
             with ctx:
                 input = X[:, :seq_len]
                 input_pseudo = X[:, :seq_len]
+                y, _ = model(input)
+                y_ps, _ = model(input_pseudo)
                 for i in range(8192 - seq_len):
-                    y, _ = model(input)
-                    y_hat.append(y)
                     input = torch.roll(input, -1, 1)
                     input[:, -1, 0] = X[:, seq_len + i, 0]
                     input[:, -1, 1:] = y[:, -1, 1:]
+                    y, _ = model(input)
+                    y_hat.append(y)
 
-                    y, _ = model(input_pseudo)
-                    y_hat_pseudo.append(y)
                     input_pseudo = torch.roll(input_pseudo, -1, 1)
                     input_pseudo[:, -1, :3] = X[:, seq_len + i, :3]
-                    input_pseudo[:, -1, 3:] = y[:, -1, 3:]
+                    input_pseudo[:, -1, 3:] = y_ps[:, -1, 3:]
+                    y_ps, _ = model(input_pseudo)
+                    y_hat_pseudo.append(y_ps)
                 y_hat = torch.concatenate(y_hat, dim=1).to(Y.device)
                 y_hat_pseudo = torch.concatenate(y_hat_pseudo, dim=1).to(Y.device)
                 # Perform the rescaling using broadcasting
