@@ -35,7 +35,7 @@ The [model](/model) directory has the designs I’m considering:
   3](https://github.com/meta-llama/llama3) \[2\]
 
 - Mamba (State-Space) based on
-  [Mamba](https://github.com/state-spaces/mamba) \[3\]
+  [Mamba](https://github.com/state-spaces/mamba) **Gu2023?**
 
 This project also heavily utilizes Andrej Karpathy’s
 [nanoGPT](https://github.com/karpathy/nanoGPT/tree/master).
@@ -66,7 +66,7 @@ is a superimposed version of the both, smoothed out with a Gaussian
 kernel. These profiles are supposed to cover static and dynamic aspects.
 ![profiles](./doc/profiles_plot.png) Throughout the entire sequence, the
 profiles are designed to stay within the specifications of the datasheet
-\[4\]. For the seak of simplicity I am focusing on short-term current
+\[3\]. For the seak of simplicity I am focusing on short-term current
 (10s), continuous current, and critical current specific to SoC ranges
 (SoC\<0.2, SoC\>0.8). A single profile guarantees one full charge and
 discharge, with a zero current intervals for equilibrium information.
@@ -78,16 +78,10 @@ approach.
 
 ### Outputs
 
-Making model only current dependent: (…success not guaranteed)
+Same time step: - Current (mapping on input)
 
-- Terminal Voltage
-- Surface Temperature
-
-Getting additional information:
-
-- State of Charge
-- Open Circuit Voltage
-- Core Temperature
+Next time step for: - Terminal Voltage - Surface Temperature - State of
+Charge - Open Circuit Voltage - Core Temperature
 
 ### Principle
 
@@ -117,6 +111,9 @@ So, it’s clear that we need to do a full HPO run given the changes in
 the dataset and the different input and output space compared to GPT-2/3
 and my thesis requirements.
 
+Results from hpo and transformer model training looking promising.
+Planned uploading until mid August!
+
 ## References
 
 <div id="refs" class="references csl-bib-body" entry-spacing="0">
@@ -141,19 +138,9 @@ Accessed: May 05, 2024. \[Online\]. Available:
 
 </div>
 
-<div id="ref-Gu2023" class="csl-entry">
-
-<span class="csl-left-margin">\[3\]
-</span><span class="csl-right-inline">A. Gu and T. Dao, “Mamba:
-Linear-Time Sequence Modeling with Selective State Spaces.” arXiv, Dec.
-01, 2023. Accessed: Apr. 24, 2024. \[Online\]. Available:
-<http://arxiv.org/abs/2312.00752></span>
-
-</div>
-
 <div id="ref-LGChem2016" class="csl-entry">
 
-<span class="csl-left-margin">\[4\]
+<span class="csl-left-margin">\[3\]
 </span><span class="csl-right-inline">LG Chem, “Datasheet INR21700 M50.”
 Aug. 23, 2016. Available:
 <https://www.dnkpower.com/wp-content/uploads/2019/02/LG-INR21700-M50-Datasheet.pdf></span>
