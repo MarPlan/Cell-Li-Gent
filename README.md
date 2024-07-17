@@ -142,7 +142,9 @@ means using only the current as an external sample source, with other
 parameters predicted auto-regressively. Both models perform impressively
 with little drift over time and a small size of around 16M parameters.
 Surface and core temperature share the same plot as well as terminal
-voltage and OCV. ![outputs](./doc/outputs.png)
+voltage and OCV. The SoC ground truth is based on Coulomb Counting and
+only a rough approximation to show the functionality, similar approach
+for the core temperature. ![outputs](./doc/outputs.png)
 
 This approach supports arbitrary parameter mapping efficiently and
 enables meta capabilities as shown in different domains.
