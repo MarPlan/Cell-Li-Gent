@@ -110,7 +110,9 @@ def plot_profiles_3d(inputs, save=False):
         / (density_2d_vt.max() - density_2d_vt.min())
     )
 
-    fig_size_1 = (8, 6)
+    # fig_size_1 = (8, 6)
+    fig_size_1 = (5.5, 4)
+    # fig.set_size_inches(fig_size_big)
     # Visualization
     fig = plt.figure(figsize=fig_size_1)
     ax = fig.add_subplot(111, projection="3d", proj_type="ortho")
@@ -198,8 +200,13 @@ def plot_profiles_3d(inputs, save=False):
     fig.tight_layout()
     plt.tight_layout()
     fig.subplots_adjust(bottom=0.2)
+
+    from matplotlib.transforms import Bbox
+    t = Bbox([[0.5, 0], [6, 4]])
     if save:
-        plt.savefig("doc/data_3d.png", dpi=300)
+        # plt.savefig("doc/data_3d.png", dpi=300)
+        plt.savefig( "doc/data_3d.pdf", format="pdf", bbox_inches=t, dpi=300)
+
     plt.show()
 
 
@@ -324,5 +331,14 @@ if __name__ == "__main__":
             axs[row, 1].set_title("Cropped Profiles")
     # Save the figure with appropriate dimensions and dpi
     fig.tight_layout()
-    plt.savefig("doc/profiles_plot.png", dpi=300)
+    # plt.savefig("doc/profiles_plot.png", dpi=300)
+    plt.savefig(
+        "doc/profiles_plot.pdf",
+        format="pdf",
+        bbox_inches="tight",
+        # pad_inches=[0, 0, 1, 0]
+        # pad_inches="tight"
+        dpi=300,
+    )
+
     plt.show()

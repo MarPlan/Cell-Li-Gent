@@ -164,7 +164,62 @@ class LRScheduler:
         return current_lr
 
 
+def plot_outputs_readme():
+
+    ckpt_path = "ckpt/transformer/final/8.6e-06_pred_loss.npy"
+    data = np.load(ckpt_path, allow_pickle=False)
+    x, y, y_hat, y_hat_pseudo = data[0], data[1], data[2], data[3]
+    t = np.arange(0, x.shape[-2])/60/60
+
+    fig = plt.figure()
+    fig_size_big = (10, 12)
+    # fig_size_big = (5.5, 4)
+    fig.set_size_inches(fig_size_big)
+    ax = fig.subplots(4, 1, sharex=True)
+
+    batch_nr = 0
+    for i in [3]:
+        ax[0].plot(t,y[batch_nr, :, i], label="Y")
+        ax[0].plot(t, y_hat[batch_nr, :, i], "--", label="y_hat")
+        ax[0].plot(t, y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
+        ax[0].set_ylabel("SoC [·]")
+        ax[0].legend(loc="lower right")
+
+    for i in [2, 4]:
+        ax[1].plot(t, y[batch_nr, :, i], label="Y")
+        ax[1].plot(t, y_hat[batch_nr, :, i], "--", label="y_hat")
+        ax[1].plot(t, y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
+        ax[1].set_ylabel("Temperature [°C]")
+
+    for i in [1, 5]:
+        ax[2].plot(t, y[batch_nr, :, i], label="Y")
+        ax[2].plot(t, y_hat[batch_nr, :, i], "--", label="y_hat")
+        ax[2].plot(t, y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
+        ax[2].set_ylabel("Voltage [V]")
+
+    for i in [0]:
+        ax[3].plot(t, y[batch_nr, :, i], label="Y")
+        ax[3].plot(t, y_hat[batch_nr, :, i], "--", label="y_hat")
+        ax[3].plot(t, y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
+        ax[3].set_ylabel("Current [A]")
+        ax[3].set_xlabel("Time [h]")
+
+    plt.tight_layout()
+    plt.savefig(
+        ckpt_path.replace(".npy", "_readme.png"),
+        format="png",
+        bbox_inches="tight",
+        # pad_inches=[0, 0, 1, 0]
+        # pad_inches="tight"
+        dpi=300,
+    )
+    plt.show()
+
+
 if __name__ == "__main__":
+
+    plot_outputs_readme()
+    t=5
     # import os
     #
     # import torch

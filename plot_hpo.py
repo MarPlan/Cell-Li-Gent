@@ -22,7 +22,7 @@ from smac.runhistory.runhistory import RunHistory
 
 # mpl.rcParams["font.family"] = "serif"
 # mpl.rcParams["font.serif"] = ["Computer Modern Serif"]
-mpl.rcParams["font.size"] = 9  # Set the font size to 11
+# mpl.rcParams["font.size"] = 9  # Set the font size to 11
 # mpl.rcParams["text.usetex"] = True  # Use LaTeX to render the text
 
 
@@ -134,14 +134,18 @@ def plot_hpo_partial(save=False):
 
     # Assume `hyperparameters` is a list of configurations and `costs` is a list of corresponding costs
     hyperparameters = np.array(hyperparameters).astype(np.float64)
-    hyperparameters= np.concatenate((hyperparameters, np.array(extracted_data["budget"]).reshape(-1, 1)), axis=1)
-    hypparam_names.append("budget")
+    # hyperparameters= np.concatenate((hyperparameters, np.array(extracted_data["budget"]).reshape(-1, 1)), axis=1)
+    # hypparam_names.append("budget")
 
     costs = np.array(extracted_data["cost"]).astype(np.float64)
-    mask = costs != 1e7
-    # mask = (costs != 1e7) & (np.array(extracted_data["budget"]) > 3200)
+    # mask = costs != 1e7
+    mask = (costs != 1e7) & (np.array(extracted_data["budget"]) > 3200)
     costs = costs[mask]
     hyperparameters = hyperparameters[mask]
+
+    # Remove rope_theta
+    # hyperparameters = hyperparameters[:,:-1]
+    # hypparam_names = hypparam_names[:-1]
 
     space = Space([(hp.min(), hp.max()) for hp in hyperparameters.T])
 
@@ -366,12 +370,12 @@ def plot_hpo_partial(save=False):
     # if save:
     # # Save the plot
     plt.savefig(
-        "hpo_partial.pdf",
-        format="pdf",
+        "hpo_partial.png",
+        format="png",
         bbox_inches="tight",
         # pad_inches=[0, 0, 1, 0]
         # pad_inches="tight"
-        # dpi=300,
+        dpi=300,
     )
 
     plt.show()

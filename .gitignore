@@ -11,5 +11,6 @@ misc.py
 vastai.md
 doc/.ipynb_checkpoints/
 hpo/
+doc/flow.pages
 
 !data/current/drive_cycle/
