@@ -91,39 +91,39 @@ a drive for innovation. I believe in **sharing knowledge** and **rapid
 iteration** to foster progress.
 
 Feel free to connect, support or chat:
-[E-Mail](marplan.battery@gmail.com) \| [X](https://x.com/MarPlan_) \|
+marplan.battery@gmail.com \| [X](https://x.com/MarPlan_) \|
 [LinkedIn](https://www.linkedin.com/in/markus-plandowski/) 🤝
 
 ## Recent Progress:
 
 ### Cell-Li-Gent, April 2024 - July 2024:
 
-See [project repository](../../README.md) for details.
+See [project repository](../README.md) for details.
 
 - Evaluated model outputs on synthetic datasets generated with PyBaMM
-  SPMe and default parameters. ![outputs](../outputs.png)
+  SPMe and default parameters. ![outputs](/outputs.png)
 - Conducted HPO runs for Transformer (and Mamba) models.
-  ![hpo](../hpo_partial.png)
+  ![hpo](/hpo_partial.png)
 - Implemented Transformer and Mamba model.
 - Setup an SPMe model with a lumped thermal model for core and surface
   temperature.
 - Generated synthetic datasets within datasheet limits.
-  ![inputs](../data_3d.png) ![inputs](../profiles_plot.png)
+  ![inputs](/data_3d.png) ![inputs](/profiles_plot.png)
 
 ### Thesis:
 
-See [thesis](../thesis.pdf) for details.
+See [thesis](/thesis.pdf) for details.
 
 - Initial benchmark and **meta** learning approach, including lab data,
   with limited compute resources and expertise 😅.
 
 <p align="center">
-<img src="../LFP_all.png" alt="Image 1" width="45%"/>
-<img src="../NMC_all.png" alt="Image 2" width="45%"/>
+<img src="/LFP_all.png" alt="Image 1" width="45%"/>
+<img src="/NMC_all.png" alt="Image 2" width="45%"/>
 </p>
 
 <figure>
-<img src="../boxplot.png" alt="benchmark" />
+<img src="/boxplot.png" alt="benchmark" />
 <figcaption aria-hidden="true">
 </figure>
 
