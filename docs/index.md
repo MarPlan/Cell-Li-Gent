@@ -122,10 +122,9 @@ See [thesis](thesis.pdf) for details.
 <img src="NMC_all.png" alt="Image 2" width="45%"/>
 </p>
 
-<figure>
-<img src="boxplot.png" alt="benchmark" />
-<figcaption aria-hidden="true">
-</figure>
+<p align="center">
+<img src="boxplot.png" alt="benchmark"/>
+</p>
 
 ## Arbitrary tools and technology tags:
 
