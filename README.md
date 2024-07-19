@@ -1,5 +1,7 @@
 # Cell-Li-Gent
 
+You can find a brief intro [here](https://MarPlan.github.io/Cell-Li-Gent/).
+
 A data-driven approach for multivariate time series prediction, aiming
 to simplify the battery modeling process, cut down on expensive battery
 tests, and enable arbitrary parameter prediction. The project utilizes a

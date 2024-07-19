@@ -183,19 +183,27 @@ def plot_outputs_readme():
         ax[0].plot(t, y_hat[batch_nr, :, i], "--", label="y_hat")
         ax[0].plot(t, y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
         ax[0].set_ylabel("SoC [·]")
-        ax[0].legend(loc="lower right")
+        ax[0].legend(loc="upper right")
 
-    for i in [2, 4]:
-        ax[1].plot(t, y[batch_nr, :, i], label="Y")
-        ax[1].plot(t, y_hat[batch_nr, :, i], "--", label="y_hat")
-        ax[1].plot(t, y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
-        ax[1].set_ylabel("Temperature [°C]")
+    ax[1].plot(t, y[batch_nr, :, 2], label="Y_surf")
+    ax[1].plot(t, y_hat[batch_nr, :, 2], "--", label="y_hat_surf")
+    ax[1].plot(t, y_hat_pseudo[batch_nr, :, 2], ":", label="y_hat_pseudo_surf")
 
-    for i in [1, 5]:
-        ax[2].plot(t, y[batch_nr, :, i], label="Y")
-        ax[2].plot(t, y_hat[batch_nr, :, i], "--", label="y_hat")
-        ax[2].plot(t, y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
-        ax[2].set_ylabel("Voltage [V]")
+    ax[1].plot(t, y[batch_nr, :, 4], label="Y_core")
+    ax[1].plot(t, y_hat[batch_nr, :, 4], "--", label="y_hat_core")
+    ax[1].plot(t, y_hat_pseudo[batch_nr, :, 4], ":", label="y_hat_pseudo_core")
+    ax[1].set_ylabel("Temperature [°C]")
+    ax[1].legend(loc="upper right")
+
+    ax[2].plot(t, y[batch_nr, :, 1], label="Y_term")
+    ax[2].plot(t, y_hat[batch_nr, :, 1], "--", label="y_term")
+    ax[2].plot(t, y_hat_pseudo[batch_nr, :, 1], ":", label="y_hat_pseudo_term")
+
+    ax[2].plot(t, y[batch_nr, :, 5], label="Y_OCV")
+    ax[2].plot(t, y_hat[batch_nr, :, 5], "--", label="y_hat_OCV")
+    ax[2].plot(t, y_hat_pseudo[batch_nr, :, 5], ":", label="y_hat_pseudo_OCV")
+    ax[2].set_ylabel("Voltage [V]")
+    ax[2].legend(loc="upper right")
 
     for i in [0]:
         ax[3].plot(t, y[batch_nr, :, i], label="Y")
@@ -203,6 +211,7 @@ def plot_outputs_readme():
         ax[3].plot(t, y_hat_pseudo[batch_nr, :, i], ":", label="y_hat_pseudo")
         ax[3].set_ylabel("Current [A]")
         ax[3].set_xlabel("Time [h]")
+        ax[3].legend(loc="upper right")
 
     plt.tight_layout()
     plt.savefig(
