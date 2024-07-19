@@ -101,18 +101,18 @@ marplan.battery@gmail.com \| [X](https://x.com/MarPlan_) \|
 See [project repository](../README.md) for details.
 
 - Evaluated model outputs on synthetic datasets generated with PyBaMM
-  SPMe and default parameters. ![outputs](/outputs.png)
+  SPMe and default parameters. ![outputs](outputs.png)
 - Conducted HPO runs for Transformer (and Mamba) models.
-  ![hpo](/hpo_partial.png)
+  ![hpo](hpo_partial.png)
 - Implemented Transformer and Mamba model.
 - Setup an SPMe model with a lumped thermal model for core and surface
   temperature.
 - Generated synthetic datasets within datasheet limits.
-  ![inputs](/data_3d.png) ![inputs](/profiles_plot.png)
+  ![inputs](data_3d.png) ![inputs](profiles_plot.png)
 
 ### Thesis:
 
-See [thesis](/thesis.pdf) for details.
+See [thesis](thesis.pdf) for details.
 
 - Initial benchmark and **meta** learning approach, including lab data,
   with limited compute resources and expertise 😅.
