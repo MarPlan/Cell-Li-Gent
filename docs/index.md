@@ -91,7 +91,7 @@ a drive for innovation. I believe in **sharing knowledge** and **rapid
 iteration** to foster progress.
 
 Feel free to connect, support or chat:
-marplan.battery@gmail.com \| [X](https://x.com/MarPlan_) \|
+[E-Mail](mailto:marplan.battery@gmail.com) \| [X](https://x.com/MarPlan_) \|
 [LinkedIn](https://www.linkedin.com/in/markus-plandowski/) 🤝
 
 ## Recent Progress:
