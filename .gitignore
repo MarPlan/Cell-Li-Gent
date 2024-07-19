@@ -4,13 +4,13 @@ __pycache__/
 .venv/
 
 README_draft.md
-doc/curr_plot.npy
+docs/curr_plot.npy
 data/
 ckpt/
 misc.py
 vastai.md
-doc/.ipynb_checkpoints/
+docs/.ipynb_checkpoints/
 hpo/
-doc/flow.pages
+docs/flow.pages
 
 !data/current/drive_cycle/
