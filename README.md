@@ -9,11 +9,11 @@ randomized protocol to create a synthetic dataset via electrochemical
 simulation, specifically the Single Particle Model with Electrolyte
 (SPMe) from [PyBaMM](https://github.com/pybamm-team/PyBaMM) \[1\]. This
 dataset fuels the training of neural networks. Inspired by the
-methodology laid out in my [thesis](/doc/thesis.pdf), the ultimate goal
+methodology laid out in my [thesis](/docs/thesis.pdf), the ultimate goal
 is not just to predict battery behavior but also to explore more
 efficient ways to operate batteries using an intelligent agent.
 
-Here’s a snapshot from my [thesis](/doc/thesis.pdf) where I compared a
+Here’s a snapshot from my [thesis](/docs/thesis.pdf) where I compared a
 classic method against a neural network with around 350k parameters,
 showing the latter’s competitive performance.
 
@@ -50,7 +50,7 @@ also performed well in my thesis benchmark.
 ### Principle
 
 <p align="center">
-<img src="./doc/flow.png" alt="Flow Chart" style="width:
+<img src="./docs/flow.png" alt="Flow Chart" style="width:
     500px; height: auto;">
 </p>
 
@@ -81,11 +81,11 @@ measurements:
 The current profiles come in three different variations: step profile
 (blue), charging and discharging phases combined from a drive cycle
 (green), and a superimposed, smoothed-out version of both (red).
-![profiles](./doc/profiles_plot.png) These profiles cover static and
+![profiles](./docs/profiles_plot.png) These profiles cover static and
 dynamic aspects and stay within the battery’s datasheet specifications
 \[4\]. Each profile includes one full charge and discharge cycle with
 zero-current intervals for equilibrium data.
-![profiles3d](./doc/data_3d.png) The plane colors depict sample density
+![profiles3d](./docs/data_3d.png) The plane colors depict sample density
 (low=yellow, high=red) at various input dimensions. The surface plot
 colors represent SoC values (0=blue, 1=orange) at given inputs (I, U,
 T). This approach forms the complete dataset for the neural networks.
@@ -94,7 +94,7 @@ T). This approach forms the complete dataset for the neural networks.
 
 Initially, I tried to skip extensive hyperparameter optimization (HPO)
 and just tweak some parameters of existing models like GPT-2/3. This
-shortcut failed, as seen [here](/doc/pred_plot.ipynb). Despite learning
+shortcut failed, as seen [here](/docs/pred_plot.ipynb). Despite learning
 some basic behavior trends, the model’s error rate soared in
 auto-regressive settings, becoming unacceptable.
 
@@ -128,7 +128,7 @@ costs and hyperparameters from SMAC3 optimization.
 | pe-type        | 2        | Absolute (sin, cos) |
 
 <figure>
-<img src="./doc/hpo_partial.png" alt="hpo" />
+<img src="./docs/hpo_partial.png" alt="hpo" />
 <figcaption aria-hidden="true">hpo</figcaption>
 </figure>
 
@@ -146,7 +146,7 @@ with little drift over time and a small size of around 16M parameters.
 Surface and core temperature share the same plot as well as terminal
 voltage and OCV. The SoC ground truth is based on Coulomb Counting and
 only a rough approximation to show the functionality, similar approach
-for the core temperature. ![outputs](./doc/outputs.png)
+for the core temperature. ![outputs](./docs/outputs.png)
 
 This approach supports arbitrary parameter mapping efficiently and
 enables meta capabilities as shown in different domains.
