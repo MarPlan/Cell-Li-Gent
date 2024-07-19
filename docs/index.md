@@ -118,12 +118,12 @@ See [thesis](thesis.pdf) for details.
   with limited compute resources and expertise 😅.
 
 <p align="center">
-<img src="/LFP_all.png" alt="Image 1" width="45%"/>
-<img src="/NMC_all.png" alt="Image 2" width="45%"/>
+<img src="LFP_all.png" alt="Image 1" width="45%"/>
+<img src="NMC_all.png" alt="Image 2" width="45%"/>
 </p>
 
 <figure>
-<img src="/boxplot.png" alt="benchmark" />
+<img src="boxplot.png" alt="benchmark" />
 <figcaption aria-hidden="true">
 </figure>
 
