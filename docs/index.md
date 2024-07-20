@@ -19,7 +19,7 @@ modeling within the operating range could become exhaustive, simplifying
 the problem to binary classification or anomaly detection beyond this
 range.
 
-As the renowned physicist David Witten mentioned regarding string
+As the renowned physicist Edward Witten mentioned regarding string
 theory, once a robust theory is established, it becomes too valuable to
 ignore. I believe the same applies to current backpropagation techniques
 and high-dimensional curve fitting. With significant successes in
