@@ -148,6 +148,18 @@ voltage and OCV. The SoC ground truth is based on Coulomb Counting and
 only a rough approximation to show the functionality, similar approach
 for the core temperature. ![outputs](./docs/outputs.png)
 
+The model prediction error shows the accuracy on a batch of 16 sequences, with
+the error averaged across the batch. The plot indicates that the model has a
+harder time when using only the current as input, compared to using current,
+terminal voltage, and surface temperature together. A positive takeaway from
+this simple analysis is that the error doesn't continuously increase over time.
+Instead, it stabilizes after a few steps, at least for the pseudo variant. This
+suggests that the model has learned the underlying behavior of the system and
+reflects this consistently across each sequence length, rather than
+accumulating an auto-regressive loss.
+
+![errors](./docs/error_plot.png)
+
 This approach supports arbitrary parameter mapping efficiently and
 enables meta capabilities as shown in different domains.
 
