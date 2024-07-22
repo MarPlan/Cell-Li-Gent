@@ -225,9 +225,85 @@ def plot_outputs_readme():
     plt.show()
 
 
+
+
+def plot_error():
+    from matplotlib.cm import get_cmap
+    from scipy.ndimage import uniform_filter1d
+    ckpt_path = "ckpt/transformer/final/8.6e-06_pred_loss.npy"
+    data = np.load(ckpt_path, allow_pickle=False)
+    x, y, y_hat, y_hat_pseudo = data[0], data[1], data[2], data[3]
+    t = np.arange(0, x.shape[-2]) / 60 / 60
+
+    # Compute the errors
+    error = np.abs(y - y_hat)
+    error_pseudo = np.abs(y - y_hat_pseudo)
+
+    # Overall mean error
+    error_mean = error.mean(axis=(0, 2))
+    error_pseudo_mean = error_pseudo.mean(axis=(0, 2))
+
+    # Individual mean errors across the last dimension
+    error_individual = error.mean(axis=0)  # Shape: [seq_len, features]
+    error_pseudo_individual = error_pseudo.mean(axis=0)  # Shape: [seq_len, features]
+
+    # Smoothing function
+    def smooth(data, window_size=500):
+        return uniform_filter1d(data, size=window_size)
+
+    fig_size_big = (10, 12)
+    fig, ax = plt.subplots(2, 1, figsize=fig_size_big, sharex=True)
+
+    # Get a colormap
+    cmap = get_cmap("tab10")
+
+
+    labels=["Current [A]","Volt_term [V]","Temp_surf [°C]","SoC [·]","Temp_core [°C]","OVC [V]"]
+    # Plotting the error subplot
+    for i in range(error_individual.shape[1]):
+        color = cmap(i % 10)  # Get a color for each feature
+        label = labels[i]
+        # Plot the raw data with lower opacity
+        ax[0].plot(t, error_individual[:, i], color=color, alpha=0.2)
+        # Plot the smoothed data
+        ax[0].plot(t, smooth(error_individual[:, i]), color=color, label=label)
+
+    # Plot overall mean error
+    ax[0].plot(t, error_mean, color='red', alpha=0.2)
+    ax[0].plot(t, smooth(error_mean), color='red', label='Overall Mean Error')
+    ax[0].set_ylabel('Mean squared error y_hat')
+    ax[0].legend()
+
+    # Plotting the error_pseudo subplot
+    for i in range(error_pseudo_individual.shape[1]):
+        color = cmap(i % 10)  # Get a color for each feature
+        label = labels[i]
+        # Plot the raw data with lower opacity
+        ax[1].plot(t, error_pseudo_individual[:, i], color=color, alpha=0.2)
+        # Plot the smoothed data
+        ax[1].plot(t, smooth(error_pseudo_individual[:, i]), color=color, label=label)
+
+    # Plot overall mean error pseudo
+    ax[1].plot(t, error_pseudo_mean, color='red', alpha=0.2)
+    ax[1].plot(t, smooth(error_pseudo_mean), color='red', label='Overall Mean Error Pseudo')
+    ax[1].set_xlabel('Time [h]')
+    ax[1].set_ylabel('Mean squared error y_hat_pseudo')
+    ax[1].legend()
+
+    plt.tight_layout()
+    plt.savefig(
+        ckpt_path.replace(".npy", "_error_comparison_smoothed.png"),
+        format="png",
+        bbox_inches="tight",
+        dpi=300,
+    )
+    plt.show()
+
+
 if __name__ == "__main__":
 
-    plot_outputs_readme()
+    plot_error()
+    # plot_outputs_readme()
     t=5
     # import os
     #

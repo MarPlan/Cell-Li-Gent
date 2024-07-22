@@ -100,6 +100,7 @@ Feel free to connect, support or chat:
 
 See [project repository](https://github.com/MarPlan/Cell-Li-Gent) for details.
 
+- Error over time analysis ![errors](error_plot.png)
 - Evaluated model outputs on synthetic datasets generated with PyBaMM
   SPMe and default parameters. ![outputs](outputs.png)
 - Conducted HPO runs for Transformer (and Mamba) models.
